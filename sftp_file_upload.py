@@ -4,11 +4,18 @@ import paramiko
 import os
 import warnings
 from cryptography.utils import CryptographyDeprecationWarning
-from libraries import *
 
 
-LOCAL_FOLDER = os.path.join(os.getcwd(), "Data_files")
 
+
+# 1. Configuration
+SFTP_HOST = "datavault.peoplestrong.com"
+SFTP_PORT = 2222
+SFTP_USER = "bankonus"
+SFTP_PASS = "B@n1%u$#90"
+
+REMOTE_TARGET_DIR = "/bankonus/Outbound/Output"
+LOCAL_FOLDER = r"C:\Users\BRADSOL\Downloads\People_Strong\Data_files"
 
 def check_remote_dir(sftp, remote_path):
     """Check if remote directory exists without creating it"""
@@ -38,10 +45,9 @@ def upload_files_to_ps():
 
         # --- STEP 1: CHECK REQUIRED REMOTE DIRECTORIES ---
         required_dirs = [
-            IMPORT_DIR,
-            ARCHIVE_DIR,
-            LOG_DIR
-            
+            REMOTE_TARGET_DIR,
+            "/bankonus/Outbound/Archive",
+            "/bankonus/Outbound/Log"
         ]
 
         for directory in required_dirs:
@@ -49,7 +55,7 @@ def upload_files_to_ps():
                 raise Exception(f"Required remote directory missing: {directory}")
 
         # Ensure we're in target upload directory
-        sftp.chdir(IMPORT_DIR)
+        sftp.chdir(REMOTE_TARGET_DIR)
 
         # --- STEP 2: UPLOAD FILES ---
         files_to_upload = [
@@ -75,7 +81,7 @@ def upload_files_to_ps():
 
                 filename = local_files[0]
                 local_path = os.path.join(LOCAL_FOLDER, filename)
-                remote_path = f"{LOG_DIR}/{filename}"
+                remote_path = f"{REMOTE_TARGET_DIR}/{filename}"
 
                 print(f"🚀 Uploading: {filename}")
                 sftp.put(local_path, remote_path)
