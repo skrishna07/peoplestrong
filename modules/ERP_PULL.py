@@ -1,6 +1,6 @@
 from libraries import *
 from modules.helpers import *
-from modules.SEND_EMAIL_SUMMARY import send_push_summary_email, send_pull_summary_email
+# from modules.SEND_EMAIL_SUMMARY import send_push_summary_email, send_pull_summary_email
 
 def ERP_to_PS_Pull():
     logging.info("="*60)
@@ -144,9 +144,9 @@ def ERP_to_PS_Pull():
         logging.info("="*60)
 
         # Step 11: Send Pull Summary Email
-        try:
-            logging.info("Step 11: Sending pull summary email...")
-            send_pull_summary_email(pull_data)
-            logging.info("Pull summary email sent successfully.")
-        except Exception as e:
-            logging.error("Failed to send pull summary email: %s", str(e))
+        # try:
+        #     logging.info("Step 11: Sending pull summary email...")
+        #     send_pull_summary_email(pull_data)
+        #     logging.info("Pull summary email sent successfully.")
+        # except Exception as e:
+        #     logging.error("Failed to send pull summary email: %s", str(e))
