@@ -1,9 +1,45 @@
-from libraries import *
+import os
+import io
+import logging
+import traceback
+import requests
+import paramiko
+import pandas as pd
+from datetime import datetime
+import json
 from modules.helpers import *
-from modules.SEND_EMAIL_SUMMARY import send_push_summary_email
-from modules.FILE_MAPPER_WITH_ERP import load_mapping_config, map_sftp_to_erp, field_map_inspector
+from dotenv import load_dotenv 
+from modules.send_email_summary import send_push_summary_email, send_pull_summary_email
+import curlify
+from modules.file_mapper_with_erp import map_sftp_to_erp
+
+from libraries import *
+# Load .env file
+load_dotenv()
+
+# Environment variables with defaults
+SFTP_HOST = os.getenv("SFTP_HOST", "datavault.peoplestrong.com")
+SFTP_USER = os.getenv("SFTP_USER", "bankonus")
+SFTP_PASS = os.getenv("SFTP_PASS", "B@n1%u$#90")
+SFTP_PORT = int(os.getenv("SFTP_PORT", 2222))
+
+ERP_URL = os.getenv("ERP_API_URL", "https://erp.innovationuae.com/api/web/bankonusimport/")
+AUTH_TOKEN = os.getenv("ERP_AUTH_TOKEN", "eyJpdiI6Ik1rYnh1Ty9nZENjR2dTdWpkMjNXcmc9PSIsInZhbHVlIjoidGF4a0lhb252QjFVSUhVeHhBcGMzdU5uZTFzU3liVkxXWGlsV2svR3VoZzNIN1Q2Uy9HMlRzdHlOR3NuVS9rSENlcFJ3cGZIK2tmYS9vU2Q0bXV1c2c9PSIsIm1hYyI6ImUwZTVmZTg4ZGQyYjAwNjZiNGM3MzBhOWZiMjBjZDNmNzYzMDhhOWFlNjUxODRlZWM2MDEwMDliNDc2NWE0Y2YiLCJ0YWciOiIifQ")
+
+ERP_TEST_IDS = os.getenv("ERP_TEST_IDS", "115976,115977,115978,115979")
+JOIN_KEY = os.getenv("JOIN_KEY", "Candidate ID")
+DOC_DIR = os.getenv("DOC_DIR", "/bankonus/Inbound/Documents")
+INPUT_DIR = os.getenv("INPUT_DIR", "/bankonus/Inbound/Input")
+ARCHIVE_DIR = os.getenv("ARCHIVE_DIR", "/bankonus/Outbound/Archive")
+IMPORT_DIR = os.getenv("IMPORT_DIR", "/bankonus/Outbound/Output")
+
+# Logger setup
+logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(levelname)s | %(message)s')
 
 
+# =====================================================
+# 1. PS_to_ERP_Push
+# =====================================================
 def PS_to_ERP_Push():
     logging.info("="*60)
     logging.info(">>> DIGITAL RELAY: PEOPLESTRONG TO ERP SYNC STARTING <<<")
@@ -76,6 +112,7 @@ def PS_to_ERP_Push():
                     try:
                         headers = {'auth': AUTH_TOKEN, 'Content-Type': 'application/json'}
                         res = requests.put(ERP_URL, headers=headers, json=payload, params=params, timeout=60) #put request
+                        curl_command = curlify.to_curl(res.request)
                         print("##############################",payload)
                         
                         if res.status_code in [200, 201]:
@@ -84,7 +121,9 @@ def PS_to_ERP_Push():
                             record_status["comments"] = "All the Fields Extracted Successfully"
                             
 
-                            
+                            curl_file_path = r"C:\Users\BRADSOL\Downloads\People_Strong\erp_curl_requests.txt"
+                            with open(curl_file_path, "a", encoding="utf-8") as f:
+                                f.write(curl_command + "\n\n")
 
                         else:
                             logging.warning("REJECTED: %s | Status %d", erpid, res.status_code)
@@ -107,10 +146,10 @@ def PS_to_ERP_Push():
                     logging.error("ARCHIVE ERROR: %s", str(e))
 
             # Send summary email
-            # try:
-            #     send_push_summary_email(push_data)
-            # except Exception as e:
-            #     logging.error("Failed to send summary email: %s", str(e))
+            try:
+                send_push_summary_email(push_data)
+            except Exception as e:
+                logging.error("Failed to send summary email: %s", str(e))
 
     except Exception as e:
         logging.critical("CRITICAL FAILURE: %s", str(e))
@@ -122,5 +161,13 @@ def PS_to_ERP_Push():
             logging.info("SFTP Connection Closed.")
             logging.info("="*60)
 
+# =====================================================
+# 2. ERP_to_PS_Pull
+# =====================================================
 
-
+# =====================================================
+# CALL FUNCTIONS DIRECTLY
+# =====================================================
+if __name__ == "__main__":
+    PS_to_ERP_Push()
+    # ERP_to_PS_Pull()
