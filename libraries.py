@@ -5,7 +5,7 @@ import traceback
 import re
 import json
 from datetime import datetime
-import win32com.client as win32
+# import win32com.client as win32
 
 
 import requests
@@ -38,6 +38,9 @@ DOC_DIR = os.getenv("DOC_DIR")
 INPUT_DIR = os.getenv("INPUT_DIR")
 ARCHIVE_DIR = os.getenv("ARCHIVE_DIR")
 IMPORT_DIR = os.getenv("IMPORT_DIR")
+LOG_DIR = os.getenv("LOG_DIR")
+
+
 
 # ------------------------------
 # Logger setup
