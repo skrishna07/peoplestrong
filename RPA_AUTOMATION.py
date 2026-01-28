@@ -10,4 +10,4 @@ from modules.PEOPLE_STRONG_PUSH import PS_to_ERP_Push
 # =====================================================
 if __name__ == "__main__":
     PS_to_ERP_Push()
-    ERP_to_PS_Pull()
+    # ERP_to_PS_Pull()
