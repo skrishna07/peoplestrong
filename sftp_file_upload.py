@@ -15,7 +15,7 @@ SFTP_USER = "bankonus"
 SFTP_PASS = "B@n1%u$#90"
 
 REMOTE_TARGET_DIR = "/bankonus/Outbound/Output"
-LOCAL_FOLDER = r"C:\Users\BRADSOL\Downloads\People_Strong\Data_files"
+LOCAL_FOLDER = os.path.join(os.getcwd(), "Data_files")
 
 def check_remote_dir(sftp, remote_path):
     """Check if remote directory exists without creating it"""
