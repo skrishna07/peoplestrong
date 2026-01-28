@@ -1,0 +1,21 @@
+{
+  "file_mapping_rules": {
+    "EmiratesID-copy": ["emirates_id_copy", "eid_copy"],
+    "EmiratesID-signedcopy": ["eid_signed"],
+    "EmiratesIDProcess-eidundertaking": ["eid_undertaking"],
+    "EmiratesIDProcess-eidregform": ["eid_reg", "eid_form"],
+    "Passport-copy": ["passport_copy"],
+    "ResidenceVisa-copy": ["e_visa_copy", "residence_visa"],
+    "EntryVisa-copy": ["entry_stamp", "imigration_cancellation"],
+    "IAorTravel-iadocuments": ["travel_ticket", "ticket_details", "ia_docs", "internal_amendment"],
+    "IAorTravel-iaemployeeundertaking": ["ia_undertaking"],
+    "LaborContract-laborcardcopy": ["mol_signed", "joining_lc", "joining_mol"],
+    "Qualification-attested": ["degree_attested"],
+    "Person-photo": ["photo.pdf", "photo.jpg"],
+    "EmployeeContract-offerletter": ["appointment_letter", "offer_letter"],
+    "EmployeeContract-joiningreportscan": ["joining_report"],
+    "Insurance-copy": ["insurance_card", "medical_insurance"],
+    "ILOEInsurance-copy": ["iloe_copy", "involuntary_insurance"],
+    "EmpOLProcess-clientauthorizationcopy": ["client_auth", "authorization_letter"]
+  }
+}
