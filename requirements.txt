@@ -1,0 +1,7 @@
+
+paramiko
+requests
+curlify
+pandas
+python-dotenv
+pywin32
