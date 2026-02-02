@@ -1,8 +1,7 @@
 from libraries import *
 from modules.helpers import *
-# from modules.SEND_EMAIL_SUMMARY import send_push_summary_email
+from modules.SEND_EMAIL_SUMMARY import send_push_summary_email
 from modules.FILE_MAPPER_WITH_ERP import load_mapping_config, map_sftp_to_erp, field_map_inspector
-
 
 def PS_to_ERP_Push():
     logging.info("="*60)
@@ -17,6 +16,7 @@ def PS_to_ERP_Push():
         logging.info("[STEP 1] Connecting to SFTP...")
         ssh, sftp = get_sftp_connection()
         all_files = sftp.listdir(IMPORT_DIR)
+        
         data_frames = {}
 
         prefixes = ['CandidateData', 'Mapping', 'CandidateContact', 'CandidateSalaryData',
@@ -106,11 +106,11 @@ def PS_to_ERP_Push():
                 except Exception as e:
                     logging.error("ARCHIVE ERROR: %s", str(e))
 
-            # Send summary email
-            # try:
-            #     send_push_summary_email(push_data)
-            # except Exception as e:
-            #     logging.error("Failed to send summary email: %s", str(e))
+            #Send summary email
+            try:
+                send_push_summary_email(push_data)
+            except Exception as e:
+                logging.error("Failed to send summary email: %s", str(e))
 
     except Exception as e:
         logging.critical("CRITICAL FAILURE: %s", str(e))

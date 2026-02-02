@@ -13,7 +13,9 @@ import paramiko
 import pandas as pd
 from dotenv import load_dotenv
 
-
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 # ------------------------------
 # Load environment variables
 # ------------------------------
@@ -41,7 +43,11 @@ IMPORT_DIR = os.getenv("IMPORT_DIR")
 LOG_DIR = os.getenv("LOG_DIR")
 
 
-
+SMTP_SERVER =os.getenv("SMTP_SERVER")
+SMTP_PORT =os.getenv("SMTP_PORT")
+SENDER_EMAIL =os.getenv("SENDER_EMAIL")
+SENDER_PASS =os.getenv("SENDER_PASS")
+RECIPIENTS =os.getenv("RECIPIENTS") 
 # ------------------------------
 # Logger setup
 # ------------------------------
