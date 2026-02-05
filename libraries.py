@@ -1,21 +1,26 @@
+# --- STANDARD LIBRARIES ---
 import os
 import io
-import logging
-import traceback
 import re
 import json
+import logging
+import traceback
+import base64
+import sqlite3
+import smtplib
+import http
 from datetime import datetime
-# import win32com.client as win32
 
-
+# --- THIRD-PARTY LIBRARIES ---
+import pandas as pd
 import requests
 import paramiko
-import pandas as pd
 from dotenv import load_dotenv
-
-import smtplib
+import time
+# --- EMAIL UTILITIES ---
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+
 # ------------------------------
 # Load environment variables
 # ------------------------------
@@ -41,6 +46,10 @@ INPUT_DIR = os.getenv("INPUT_DIR")
 ARCHIVE_DIR = os.getenv("ARCHIVE_DIR")
 IMPORT_DIR = os.getenv("IMPORT_DIR")
 LOG_DIR = os.getenv("LOG_DIR")
+ERP_HOST= os.getenv("ERP_HOST")
+ERP_ENDPOINT = os.getenv("ERP_ENDPOINT")
+
+
 
 
 SMTP_SERVER =os.getenv("SMTP_SERVER")

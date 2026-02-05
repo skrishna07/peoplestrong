@@ -1,6 +1,4 @@
 from libraries import *
-import datetime
-
 # =====================================================
 # Helper functions for SFTP
 # =====================================================
@@ -21,41 +19,6 @@ def create_remote_folder(sftp, remote_path):
         sftp.mkdir(remote_path)
     else:
         print(f"✅ Remote folder already exists: {remote_path}")
-
-def get_candidate_document_links(candidate_folder_name: str):
-    """
-    Given a candidate folder name inside the Document directory, 
-    returns a list of SFTP file links for all files in that folder.
-    """
-    links = []
-    ssh = None
-    try:
-        ssh, sftp = get_sftp_connection()
-        remote_folder_path = f"/bankonus/Outbound/Document/{candidate_folder_name}"
-
-        if not check_remote_dir(sftp, remote_folder_path):
-            logging.warning(f"Folder does not exist on SFTP: {remote_folder_path}")
-            return links
-
-        files = sftp.listdir(remote_folder_path)
-        if not files:
-            logging.info(f"No files found in folder: {remote_folder_path}")
-            return links
-
-        base_link = "https://datavault.peoplestrong.com/file/d"
-        for file in files:
-            # Ensure the link format includes folder prefix in filename
-            if not file.startswith(candidate_folder_name):
-                file = f"{candidate_folder_name}_{file}"
-            link = f"{base_link}{remote_folder_path}/{file}"
-            links.append(link)
-
-    except Exception as e:
-        logging.error(f"Error fetching document links for {candidate_folder_name}: {str(e)}")
-    finally:
-        if ssh:
-            ssh.close()
-    return links
 
 
 
@@ -140,7 +103,8 @@ def log_event(message, is_error=False):
     Logs messages to specific files based on the status.
     Path: ./logs/
     """
-    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
     log_dir = "logs"
     
     # Ensure directory exists
