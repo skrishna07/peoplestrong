@@ -1,236 +1,215 @@
-# --- CUSTOM MODULE IMPORTS ---
+# ============================================================
+# PEOPLESTRONG → ERP | FINAL PRODUCTION FILE 
+# ============================================================
+
 from libraries import *
-from modules.helpers import *
+from modules.Helpers import *
 from modules.Text_Field_Validator import *
 from modules.Files_Field_Validator import *
 from modules.Sql_Helper import *
 from modules.Pending_Process import *
+from modules.Csv_File_Handler import *
+from api_handler.Ps_to_Erp_Requestor import send_to_erp
+from modules.Document_Base64_Generator import get_candidate_document_links
+
+from modules.SEND_EMAIL_SUMMARY import send_push_summary_email
+# ============================================================
+# CONFIG
+# ============================================================
+
+REPORT_FILE = "PeopleStrong_Master_Report.xlsx"
 
 
-# --- EXCEL REPORTING UTILITY ---
-def append_to_validation_excel(data_row, file_path="Sync_Master_Report.xlsx"):
-    """Appends mapping data to the master report with a fixed column order."""
-    column_order = [
-        "Sync_Timestamp", "ERP_ID", "Candidate_ID", "Sync_Status", "Files_Count",
-        "Person-addresstype", "Person-currentaddress", "Person-addressline2",
-        "Person-addressline3", "Person-pincode", "Person-city", "Person-district",
-        "Person-state", "Person-country", "EmpCustomization-edu_level",
-        "EmpCustomization-specialization", "EmpCustomization-institute",
-        "EmpCustomization-startdate", "EmpCustomization-enddate",
-        "EmpCustomization-is_highest", "Person-title", "Person-middlename",
-        "Person-gender_id|disp", "Person-mothername", "Person-maritalstatus_id|disp",
-        "Person-religion_id|disp", "Person-nationality_id|disp", "AltPhoneDetails",
-        "AltPhone", "Person-emergencycontactisd", "EmployeeContract-clause",
-        "EmployeeContract-clientauth", "EmployeeContract-doj",
-        "EmployeeContract-legalstatus_id", "Person-emergencycontactnumber",
-        "Person-emergencycontactrelation", "Person-emergencycontactname",
-        "EmpCustomization-id_number", "EmpCustomization-id_type",
-        "EmpCustomization-placeofissue", "EmpCustomization-dateofissue",
-        "EmpCustomization-valid_till", "SalaryHead-Basic", "Salary-total",
-        "Salary-effectivedate", "All_File_Names", "Time_Taken", "Upload_Errors"
-    ]
+def build_erp_payload(row):
+    payload = {
 
-    try:
-        df_new = pd.DataFrame([data_row]).reindex(columns=column_order)
+        # ================= PERSON =================
+        "Person-title_id|disp": scalar(row.get("Title")),
+        "Person-firstname": scalar(row.get("First Name")),
+        "Person-middlename": scalar(row.get("Middle Name")),
+        "Person-lastname": scalar(row.get("Last Name")),
+        "Person-gender_id|disp": scalar(row.get("Gender")),
+        "Person-mothername": scalar(row.get("Mothers Name")),
+        "Person-birthdate": fmt_date(scalar(row.get("Birth Date"))),
+        "Person-maritalstatus_id|disp": scalar(row.get("maritalstatus")),
+        "Person-religion_id|disp": scalar(row.get("Religion")),
+        "Person-nationality_id|disp": scalar(row.get("nationality")),
+        "AltPhoneDetails": scalar(row.get("Alt Phone ISD")),
+        "AltPhone": "971-" + scalar(row.get("Alt Phone")),
+        "Email": scalar(row.get("Alt Email")),
 
-        if not os.path.exists(file_path):
-            df_new.to_excel(file_path, index=False, engine='openpyxl')
-        else:
-            with pd.ExcelWriter(file_path, engine='openpyxl', mode='a', if_sheet_exists='overlay') as writer:
-                existing_df = pd.read_excel(file_path)
-                start_row = len(existing_df) + 1
-                df_new.to_excel(writer, index=False, header=False, startrow=start_row)
+        # ================= ADDRESS =================
+        "Address-addresstype_id|disp": scalar(row.get("Address Type")),
+        "Address-line1": scalar(row.get("AddressLine1")),
+        "Address-line2": scalar(row.get("AddressLine2")),
+        "Address-line3": scalar(row.get("AddressLine3")),
+        "Address-zip": scalar(row.get("PIN")),
+        "Address-city": scalar(row.get("City")),
+        "Address-state": scalar(row.get("State")),
+        "Address-country_id|disp": scalar(row.get("Country")),
+        "LocalAddress": scalar(row.get("LocalAddress")),
+        "HomeAddress": scalar(row.get("HomeAddress")),
 
-        logging.info(f"[EXCEL] Data logged correctly for ERPID: {data_row.get('ERP_ID')}")
-    except Exception as e:
-        logging.error(f"[EXCEL] Error appending data: {e}")
+        # ================= EDUCATION =================
+        "Qualification-degreetype|disp": scalar(row.get("Edu Level")),
+        "Qualification-studymajor": scalar(row.get("Specialization")),
+        "Qualification-university": scalar(row.get("Institute Name")),
+        "Qualification-datefrom": fmt_date(scalar(row.get("Start Date"))),
+        "Qualification-dateto": fmt_date(scalar(row.get("End Date"))),
+        "EmpCustomization-is_highest": scalar(row.get("Is Highest Qualification")),
+
+        # ================= EMERGENCY =================
+        "EmergyPhone": f'{row.get("Emergency Contact Number").lstrip("+").replace(" ", "")[:3]}-{row.get("Emergency Contact Number").lstrip("+").replace(" ", "")[3:]}',
+        "EmergyPhoneDetails": scalar(row.get("Emergency Contact Relation")) + "-" + scalar(row.get("Emergency Contact Name")),
+
+        # ================= ID =================
+        "Passport-number": scalar(row.get("Passport-number")),
+        "Passport-issuedate": fmt_date(scalar(row.get("Passport-issuedate"))),
+        "Passport-issueplace": scalar(row.get("Passport-issueplace")),
+        "Passport-expiry": fmt_date(scalar(row.get("Passport-expiry"))),
+
+        "SponsorPassport-number": scalar(row.get("SponsorPassport-number")),
+        "SponsorPassport-issuedate": fmt_date(scalar(row.get("SponsorPassport-issuedate"))),
+        "SponsorPassport-issueplace": scalar(row.get("SponsorPassport-issueplace")),
+        "SponsorPassport-expiry": fmt_date(scalar(row.get("SponsorPassport-expiry"))),
+
+        "EmiratesID-number": scalar(row.get("EmiratesID-number")),
+        "EmiratesID-issuingdate": fmt_date(scalar(row.get("EmiratesID-issuingdate"))),
+        "EmiratesID-expirydate": fmt_date(scalar(row.get("EmiratesID-expirydate"))),
+
+        "SponsorEmiratesID-number": scalar(row.get("SponsorEmiratesID-number")),
+        "SponsorEmiratesID-issuingdate": fmt_date(scalar(row.get("SponsorEmiratesID-issuingdate"))),
+        "SponsorEmiratesID-expirydate": fmt_date(scalar(row.get("SponsorEmiratesID-expirydate"))),
+
+        "SponsorVisa-number": scalar(row.get("SponsorVisa-number")),
+        "SponsorVisa-placeofissue": scalar(row.get("SponsorVisa-placeofissue")),
+        "SponsorVisa-startdate": fmt_date(scalar(row.get("SponsorVisa-startdate"))),
+        "SponsorVisa-enddate": fmt_date(scalar(row.get("SponsorVisa-enddate"))),
+
+        "NOC-number": scalar(row.get("NOC-number")),
+        "NOC-issuedate": fmt_date(scalar(row.get("NOC-issuedate"))),
+        "NOC-expirydate": fmt_date(scalar(row.get("NOC-expirydate"))),
+
+        "ILOEInsurance-empcompliance_id|disp": scalar(row.get("MedicalInsurance-number")),
+        "MedicalInsurance-issuedate": fmt_date(scalar(row.get("MedicalInsurance-issuedate"))),
+        "ILOEInsurance-expirydate": fmt_date(scalar(row.get("MedicalInsurance-expirydate"))),
+
+        # ================= EMPLOYMENT =================
+        "MOLOL-additionalclause": scalar(row.get("Contract Clause")),
+        "EmployeeContract-legalstatus_id": scalar(row.get("Legal status")),
+        "EmployeeContract-probationperiod": scalar(row.get("Probation")),
+        "EmployeeContract-noticeperiod": scalar(row.get("Notice Period")),
+        "EmployeeContract-empworkinghours": scalar(row.get("working hours")),
+        "EmployeeContract-worktype|disp": scalar(row.get("work type")),
+        "EmployeeContract-insuranceeligibiity_id|disp": scalar(row.get("insurance eligibility")),
+        "EmployeeContract-airfareeligibility|disp": scalar(row.get("airfare eligibility")),
+        "EmployeeContract-designation_id|disp": scalar(row.get("client designation")),
+        "EmployeeContract-clientauth": scalar(row.get("client authorization details")),
+        "EmployeeContract-startdate": fmt_date(scalar(row.get("Date of joining"))),
+        "EmployeeContract-employeestatus_id|disp": scalar(row.get("Final Employment Status")),
+
+        # ================= SALARY =================
+        "SalaryHead_Basic": scalar(row.get("Salary_Basic")),
+        "SalaryHead_HRA": scalar(row.get("Salary_HRA")),
+        "SalaryHead_Food": scalar(row.get("Salary_Food")),
+        "SalaryHead_Transport": scalar(row.get("Salary_Transport")),
+        "SalaryHead_Telephone": scalar(row.get("Salary_Telephone")),
+        "SalaryHead_Medical": scalar(row.get("Salary_Medical")),
+        "SalaryHead_Electricity": scalar(row.get("Salary_Electricity")),
+        "SalaryHead_Other Allowance": scalar(row.get("Salary_Other")),
+        "SalaryHead_Variable Allowance": scalar(row.get("Salary_Variable")),
+        "SalaryHead_Annual Leave Allowance": scalar(row.get("Salary_AnnualLeave")),
+        "SalaryHead_Airfare Allowance": scalar(row.get("Salary_Airfare")),
+        "Salary-startdate": fmt_date(scalar(row.get("Salary_EffectiveDate")))
+    }
+
+    payload = field_inspector(payload)
+    logging.info("[PHASE 6] ERP Payload AFTER validation")
+    return payload
 
 
-def generate_curl(erpid, payload_json, headers):
-    return f"""
-curl -X PUT https://{ERP_HOST}{ERP_ENDPOINT} \\
-  -H "auth: {headers['auth']}" \\
-  -H "Content-Type: application/json" \\
-  -d '{payload_json}'
-""".strip()
+from concurrent.futures import ThreadPoolExecutor
 
-
-def send_request_to_erp(erpid, payload_data, file_data=None):
-    """
-    Send candidate data to ERP using HTTP PUT.
-    payload_data: dict of candidate fields
-    file_data: dict of ERP key -> Base64 file
-    """
-    try:
-        headers = {
-            "auth": AUTH_TOKEN,
-            "Content-Type": "application/json"
-        }
-
-        payload = {
-            "data": {
-                erpid: {
-                    "data": payload_data,
-                    "files": file_data if file_data else {}
-                }
-            }
-        }
-
-        payload_json = json.dumps(payload)
-
-        # Send request
-        conn = http.client.HTTPSConnection(ERP_HOST)
-        conn.request("PUT", ERP_ENDPOINT, body=payload_json, headers=headers)
-        res = conn.getresponse()
-
-        # Save curl command for cross-check
-        curl_cmd = generate_curl(erpid, payload_json, headers)
-        with open(r"C:\Users\BRADSOL\Downloads\PEOPLE_STRONG_WITH_PYTHON\cross_check_payload.curl", "w", encoding="utf-8") as f:
-            f.write(curl_cmd)
-
-        res_data = res.read().decode("utf-8")
-        print(f"[ERP RESPONSE for {erpid}]")
-        print(res_data)
-
-        res_json = json.loads(res_data)
-
-        # Handle ERP response
-        if res.status in [200, 201]:
-            errors = res_json.get("upload_errors", {})
-            if not errors:
-                logging.info(f"✅ Sync Success: {erpid}")
-                return True, ""
-            else:
-                # Map ERP errors into Excel
-                error_str = "; ".join([f"{k}: {', '.join(v)}" for k, v in errors.items()])
-                logging.warning(f"❌ Validation Failed for {erpid}: {error_str}")
-                return False, error_str
-        else:
-            logging.error(f"❌ Server Rejected {res.status}: {res_data}")
-            return False, f"Server Rejected {res.status}"
-
-    except Exception as e:
-        logging.error(f"❌ Connection Error: {str(e)}")
-        return False, str(e)
-
-
-# --- API TRANSPORT LAYER ---
 def PS_to_ERP_Push():
-    logging.info("="*60)
-    logging.info(">>> STARTING PEOPLESTRONG TO ERP DIGITAL RELAY <<<")
-    logging.info("="*60)
+    logging.info("===== PEOPLESTRONG → ERP START =====")
+    logging.info(f"Job Started At: {datetime.now()}")
 
-    init_db()
-    # process_pending_queue()
+    ssh, sftp = get_sftp_connection()
+    logging.info("[PHASE 1] SFTP connected")
 
-    ssh = None
+    # Load and prepare master dataframe
+    dfs = load_csvs(sftp)
+    master = build_master_dataframe(dfs)
+    dump_df(master, "RPA_Master_File")
+
+    push_data = []
+
+    for _, r in master.iterrows():
+        cid = r[JOIN_KEY]
+        erpid = safe(r.get("ERPID"))
+
+        logging.info("-" * 60)
+        logging.info(f"[PHASE 5] Processing Candidate: {cid}")
+
+        if not erpid:
+            logging.warning("[SKIP] ERPID missing — skipping candidate")
+            push_data.append({
+                "CandidateID": cid,
+                "ERPID": erpid or "N/A",
+                "status": "FAILED",
+                "comments": "Missing ERPID — skipped"
+            })
+            continue
+
+        # ================= ADDRESS SNAPSHOT =================
+        print_peoplestrong_snapshot(r)
+
+        # ================= PARALLEL PAYLOAD AND DOCUMENT FETCH =================
+        try:
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                future_text = executor.submit(build_erp_payload, r)
+                future_docs = executor.submit(get_candidate_document_links, cid)
+
+                Text_payload = future_text.result()
+                File_Payload = future_docs.result()
+
+            logging.info("[PHASE 6] Text payload and document links ready")
+        except Exception as e:
+            logging.error(f"[ERROR] Failed to prepare payload/docs for {cid}: {e}")
+            push_data.append({
+                "CandidateID": cid,
+                "ERPID": erpid,
+                "status": "FAILED",
+                "comments": f"Payload/Document prep failed: {str(e)}"
+            })
+            continue
+
+        # ================= ERP PUSH =================
+        try:
+            status, resp = send_to_erp(erpid, payload_data=Text_payload, file_data=File_Payload)
+            bot_comment = "Synced Successfully" if status == "SUCCESS" else f"Failed: {resp}"
+
+            logging.info(f"[PHASE 7] ERP Status={status} | ERPID={erpid}")
+            print(f"[PHASE 7] ERP Response: {resp}")
+        except Exception as e:
+            logging.error(f"[ERROR] ERP push failed for {erpid}: {e}")
+            status = "FAILED"
+            bot_comment = f"ERP push exception: {str(e)}"
+
+        # ================= COLLECT PUSH DATA =================
+        push_data.append({
+            "CandidateID": cid,
+            "ERPID": erpid,
+            "status": status,
+            "comments": bot_comment
+        })
+
+    # ================= SEND SUMMARY EMAIL =================
     try:
-        # --- PHASE 2: SFTP EXTRACTION ---
-        logging.info("[PHASE 2] Connecting to SFTP for data extraction...")
-        ssh, sftp = get_sftp_connection()
-        all_files = sftp.listdir(IMPORT_DIR)
-
-        data_frames = {}
-        prefixes = ['CandidateData', 'Mapping', 'CandidateContact', 'CandidateSalaryData',
-                    'CandidateEducation', 'CandidateIDDetails', 'CandidateEmergencyContact']
-
-        for prefix in prefixes:
-            matches = [f for f in all_files if f.startswith(prefix) and f.endswith('.csv')]
-            if matches:
-                latest_file = sorted(matches, reverse=True)[0]
-                logging.info(f"[PHASE 2] Reading latest {prefix}: {latest_file}")
-                with sftp.open(f"{IMPORT_DIR}/{latest_file}", "rb") as f:
-                    df = pd.read_csv(io.BytesIO(f.read()), sep='|', dtype=str)
-                    df.columns = df.columns.str.strip()
-                    if prefix == 'Mapping':
-                        df = df.rename(columns={'PeopleStrongID': JOIN_KEY})
-                    data_frames[prefix] = df
-
-        # --- PHASE 3: DATA MERGING & CLEANING ---
-        if 'CandidateData' not in data_frames:
-            logging.error("[PHASE 3] Critical: CandidateData.csv missing. Aborting.")
-            return
-
-        logging.info("[PHASE 3] Merging all CSV data into Master DataFrame...")
-        master_df = data_frames['CandidateData']
-        for key in [k for k in data_frames.keys() if k != 'CandidateData']:
-            if JOIN_KEY in data_frames[key].columns:
-                master_df = pd.merge(master_df, data_frames[key], on=JOIN_KEY, how='left')
-
-        master_df['ERPID'] = master_df['ERPID'].astype(str).str.split('.').str[0]
-        final_df = master_df[master_df['ERPID'].notnull() & (master_df['ERPID'] != 'nan')].drop_duplicates(subset=['ERPID'])
-        logging.info(f"[PHASE 3] Found {len(final_df)} valid candidates to process.")
-
-        # --- PHASE 4: TRANSFORMATION & DELIVERY ---
-        logging.info("[PHASE 4] Loading mapping configurations...")
-        text_mapping = load_text_mapping_config()
-
-        for _, row in final_df.iterrows():
-            erpid = str(row.get('ERPID'))
-            candidate_folder = row.get('Candidate ID')
-            logging.info(f"--- Processing ERPID: {erpid} ---")
-
-            validation_row = {
-                "Sync_Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "ERP_ID": erpid,
-                "Candidate_ID": candidate_folder
-            }
-
-            # 1. Prepare Text Fields
-            payload_text = {}
-            for ps_header, erp_key in text_mapping.items():
-                val = row.get(ps_header)
-                if pd.notnull(val) and str(val).strip() != "":
-                    val = str(val).strip()
-                    if any(x in erp_key.lower() for x in ["date", "birth", "doj", "till", "expiry"]):
-                        try: val = pd.to_datetime(val).strftime('%Y-%m-%d')
-                        except: pass
-                    elif any(x in erp_key.lower() for x in ["total", "basic", "amount"]):
-                        try: val = "{:.4f}".format(float(val))
-                        except: val = "0.0000"
-                    payload_text[erp_key] = val
-                    validation_row[erp_key] = val
-                else:
-                    validation_row[erp_key] = "N/A"
-
-            print(f"[DEBUG] Raw PeopleStrong fields for ERPID {erpid}:")
-            print({ps_header: row.get(ps_header) for ps_header in text_mapping.keys()})
-
-            # 2. Fetch Files
-            logging.info(f"[PHASE 4] Fetching documents for {erpid}...")
-            file_payload = get_candidate_document_links(candidate_folder)
-            validation_row["Files_Count"] = len(file_payload)
-            validation_row["All_File_Names"] = ", ".join(file_payload.keys()) if file_payload else "N/A"
-
-            # 3. Validate Fields
-            field_validator_returned_text = field_inspector(payload_text=payload_text)
-
-            # 4. Send to ERP
-            start_time = time.time()
-            success, error_str = send_request_to_erp(erpid, field_validator_returned_text, file_payload)
-            end_time = time.time()
-            validation_row["Time_Taken"] = round(end_time - start_time, 2)
-            validation_row["Upload_Errors"] = error_str
-
-            if success:
-                remove_from_queue(erpid)
-                validation_row["Sync_Status"] = "SUCCESS"
-                logging.info(f"✅ ERPID {erpid} Sync Complete.")
-            else:
-                combined_queue_payload = {"data": payload_text, "files": file_payload}
-                save_to_queue(erpid, combined_queue_payload)
-                validation_row["Sync_Status"] = "FAILED/QUEUED"
-                logging.warning(f"⚠️ ERPID {erpid} Sync Failed.")
-
-            append_to_validation_excel(validation_row)
-
+        send_push_summary_email(push_data)
+        logging.info(f"[SUMMARY] Sent summary email for {len(push_data)} candidates")
     except Exception as e:
-        logging.critical(f"SYSTEM FATAL ERROR: {str(e)}")
-        logging.error(traceback.format_exc())
-    finally:
-        if ssh:
-            ssh.close()
-            logging.info("[CLEANUP] SFTP connection closed.")
-        logging.info("="*60)
-        logging.info(">>> DIGITAL RELAY CYCLE FINISHED <<<")
-        logging.info("="*60)
+        logging.error("Failed to send summary email: %s", str(e))
+
+    ssh.close()
+    logging.info("===== PROCESS COMPLETE =====")

@@ -3,7 +3,7 @@
 from libraries import *
 
 
-from modules.helpers import log_event
+from modules.Helpers import log_event
 
 
 def load_text_mapping_config(config_path="text_data.json"):
@@ -43,83 +43,157 @@ def convert_to_months(value):
         return 1
     
 
+def to_days(val):
+    try:
+        s = str(val).lower()
+        num = int("".join(filter(str.isdigit, s)))
+        if "month" in s:
+            return num * 30
+        return num
+    except:
+        return None
 
 
-def field_inspector(payload_text):
+def nearest_value(days, allowed_map):
     """
-    Silent Fixer: Reprograms data formats on the fly.
-    Returns ONLY the payload, ready for the ERP.
+    allowed_map = { days: 'ERP Display Value' }
     """
-    fixed_payload = {}
-    
-    # Mapping labels to the Integer IDs the ERP demanded
+    if days is None:
+        return ""
+
+    return allowed_map[min(allowed_map.keys(), key=lambda x: abs(x - days))]
+
+
+def field_inspector(payload):
     legal_status_ids = {
-    "ksatempvisa": 1,
-    "billingcontract": 2,
-    "payrollonly": 3,
-    "servicevisa": 4,
-    "visaapplicant": 5,
-    "missionvisa": 6,
-    "lcapplicant6month": 7,
-    "lcapplicant1year": 8,
-    "lcapplicant2year": 9
+        "visa applicant - current visa (employment visa)": 5,
+        "service visa": 4,
+        "payroll only": 3,
+    }
+
+    employee_status_ids = {
+        "single": 1,
+        "married": 2
+    }
+
+    probation_allowed = {
+        30: "1 Month",
+        60: "2 Month",
+        90: "3 Month",
+        120: "4 Month",
+        150: "5 Month",
+        360: "12 Month"
+    }
+
+    notice_allowed = {
+        0: "No Notice",
+        7: "7 Days",
+        10: "10 Days",
+        15: "15 Days",
+        60: "2 Months",
+        90: "3 Months"
+    }
+    WORK_TYPE_IDS = {
+    "full-time": 1,
+    "part-time": 2,
+    "contract": 3
+}
+
+    INSURANCE_IDS = {
+        "eligible": 1,
+        "not eligible": 2
+    }
+
+    AIRFARE_IDS = {
+        "eligible": 1,
+        "not eligible": 2
+    }
+    gender_ids = {
+    "male": 1,
+    "female": 2,
+    "other": 3
 }
     
 
-    employee_status_ids={
-        "Single":1,
-        "Married":2
-    }
+    DEGREE_MAP = {
+    "Ph.D": "Ph.D",
+    "Doctorate": "Ph.D",
+    "Master's Degree": "Master",
+    "Master": "Master",
+    "Post Graduation Diploma": "Post Graduation Diploma",
+    "Associate's Degree/College Diploma": "Associate Diploma",
+    "Bachelor's Degree": "Bachelor",
+    "Bachelor": "Bachelor",
+    "Diploma": "Diploma",
+    "High School": "Diploma"  # optional fallback
+}
 
 
-    for key, val in payload_text.items():
-        # Clean the value
-        if pd.isna(val) or str(val).strip().lower() in ['nan', '', 'n/a']:
-            fixed_payload[key] = "" # Send empty string rather than crashing
+
+
+    fixed = {}
+
+    for k, v in payload.items():
+        if v is None or str(v).strip().lower() in ("", "nan", "n/a"):
+            fixed[k] = ""
             continue
-            
-        val = str(val).strip()
 
-        # --- AUTO-FIX LOGIC ---
+        val = str(v).strip()
 
-        # 1. Force Integer for Legal Status
-        if key == "EmployeeContract-legalstatus_id":
-            fixed_payload[key] = legal_status_ids.get(val, 1) # Default to 1 if label not found
-        if key == "EmployeeContract-employeestatus_id|disp":
-            fixed_payload["EmployeeContract-employeestatus_id|disp"] = employee_status_ids.get(val, 1)
+        # ---------- LEGAL STATUS ----------
+        if k == "EmployeeContract-legalstatus_id":
+            fixed[k] = legal_status_ids.get(val.lower(), 1)
+
+        elif k == "Person-gender_id|disp":
+            fixed[k] = gender_ids.get(val.lower(), "")
 
 
-        if key == "AltPhone":
+        # ---------- EMPLOYEE STATUS ----------
+        elif k == "EmployeeContract-employeestatus_id|disp":
+            fixed["EmployeeContract-employeestatus_id|disp"] = employee_status_ids.get(val.lower(), 1)
 
-            if "-" not in val:
-                fixed_payload[key] = f"971-{val}"
-            else:
-                fixed_payload[key] = val
+        # ---------- PROBATION ----------
+        elif k == "EmployeeContract-probationperiod":
+            days = to_days(val)
+            fixed[k] = nearest_value(days, probation_allowed)
 
-        # 2. Force YYYY-MM-DD for all Date fields
-        elif any(x in key.lower() for x in ["date", "till", "doj", "start", "end", "birth"]):
+        # ---------- NOTICE PERIOD ----------
+        elif k == "EmployeeContract-noticeperiod":
+            days = to_days(val)
+            fixed[k] = nearest_value(days, notice_allowed)
+
+        # ---------- DATE FIELDS ----------
+        elif any(x in k.lower() for x in ("date", "start", "end", "birth")):
             try:
-                fixed_payload[key] = pd.to_datetime(val).strftime('%Y-%m-%d')
+                fixed[k] = pd.to_datetime(val).strftime("%Y-%m-%d")
             except:
-                fixed_payload[key] = val # Pass as-is if date logic fails
+                fixed[k] = ""
 
-        # 3. Force 0.0000 for all Currency/Amount fields
-        elif any(x in key.lower() for x in ["total", "amount", "basic"]):
+        # ---------- SALARY ----------
+        elif any(x in k.lower() for x in ("salary", "basic", "hra", "total")):
             try:
-                fixed_payload[key] = "{:.4f}".format(float(val))
+                fixed[k] = f"{float(val):.4f}"
             except:
-                fixed_payload[key] = "0.0000"
+                fixed[k] = "0.0000"
+        elif k == "EmployeeContract-worktype|disp":
+            fixed[k] = WORK_TYPE_IDS.get(val.lower(), 1)
 
-        # 4. Strip .0 from ID Numbers and Pincodes (Pandas float fix)
-        elif any(x in key.lower() for x in ["pincode", "number", "id_number"]):
-            fixed_payload[key] = val.split('.')[0]
+        elif k == "EmployeeContract-insuranceeligibiity_id|disp":
+            fixed[k] = INSURANCE_IDS.get(val.lower(), 1)
 
-        # 5. All other 40 fields pass through clean
+        elif k == "EmployeeContract-airfareeligibility|disp":
+            fixed[k] = AIRFARE_IDS.get(val.lower(), 1)
+        elif k == "Qualification-degreetype|disp":
+            fixed[k] =  DEGREE_MAP.get(val, "Diploma") 
+
+
         else:
-            fixed_payload[key] = val
+            fixed[k] = val
 
-    return fixed_payload
-   
+    logging.info(f"[FIELD_INSPECTOR] Payload sanitized safely (fields={len(fixed)})")
+    return fixed
+
+
 def normalize_name(name: str) -> str:
     """
     Normalize filenames and aliases for matching:

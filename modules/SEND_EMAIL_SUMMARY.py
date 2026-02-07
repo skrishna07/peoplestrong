@@ -1,4 +1,4 @@
-from modules.helpers import log_event  
+from modules.Helpers import log_event  
 from libraries import *
 
 

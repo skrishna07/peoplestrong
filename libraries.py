@@ -9,6 +9,11 @@ import base64
 import sqlite3
 import smtplib
 import http
+
+import tempfile
+import base64
+import logging
+import shutil
 from datetime import datetime
 
 # --- THIRD-PARTY LIBRARIES ---
@@ -20,7 +25,10 @@ import time
 # --- EMAIL UTILITIES ---
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-
+import csv
+import os, re, io, json, time, logging, http.client
+import pandas as pd
+from datetime import datetime
 # ------------------------------
 # Load environment variables
 # ------------------------------
@@ -60,6 +68,8 @@ RECIPIENTS =os.getenv("RECIPIENTS")
 # ------------------------------
 # Logger setup
 # ------------------------------
+
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s"

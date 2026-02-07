@@ -47,17 +47,6 @@ def safe_archive_file(sftp, source_path, archive_dir):
 
 
 
-    
-
-def get_verified_doc_code(erp_label):
-    """Client Spec: Labour Card, Stamped Visa and EID Copy"""
-    mapping = {
-        "labour_card": "Labour Card",
-        "visa": "Stamped Visa",
-        "eid": "EID Copy"
-    }
-    return mapping.get(erp_label.lower(), "Labour Card")
-
 def is_not_duplicate(sftp, target_dir, emp_id, doc_code):
     """Client Spec: Combination of Candidate ID and Doc Code should not be duplicate"""
     try:
@@ -138,21 +127,115 @@ def log_event(message, is_error=False):
     ######################Mapper
 
 
-def format_alt_phone(phone_input):
+
+
+
+
+
+
+
+#======================================
+def safe(v):
+    return v if pd.notna(v) and str(v).strip() else ""
+
+def fmt_date(v):
+    try:
+        return pd.to_datetime(v).strftime("%Y-%m-%d")
+    except:
+        return ""
+
+
+
+def scalar(val):
     """
-    Strictly formats the AltPhone string for the Innovation ERP.
-    Input: "+971521228656"
-    Output: "971-521228656"
+    Always return a clean scalar string for ERP.
+    Handles Series, NaN, None safely.
     """
-    # 1. Strip all non-numeric characters
-    digits = re.sub(r'\D', '', str(phone_input))
-    
-    # 2. Apply formatting logic
-    if digits.startswith('971'):
-        return f"971-{digits[3:]}"
-    elif digits.startswith('0'):
-        # Converts local 052... to 971-52...
-        return f"971-{digits[1:]}"
-    else:
-        # Fallback: Hyphenate after first 3 digits
-        return f"{digits[:3]}-{digits[3:]}"
+    if isinstance(val, pd.Series):
+        if val.empty:
+            return ""
+        val = val.iloc[0]
+    if pd.isna(val):
+        return ""
+    return str(val).strip()
+
+
+
+
+
+def print_peoplestrong_snapshot(row):
+    print("\n" + "=" * 100)
+    print("🟢 PEOPLESTRONG DATA SNAPSHOT (BEFORE ERP MAPPING)")
+    print("=" * 100)
+
+    # ---------------- CORE / PERSONAL DETAILS ----------------
+    print("\n📌 CORE / PERSONAL DETAILS")
+    personal_cols = [
+        "Candidate ID","Title","First Name","Middle Name","Last Name",
+        "Gender","Mothers Name","Birth Date","maritalstatus",
+        "Religion","nationality","Alt Phone ISD","Alt Phone","Alt Email",
+        "Contract Clause","Legal status","Probation","Notice Period",
+        "working hours","work type","insurance eligibility",
+        "airfare eligibility","client designation",
+        "client authorization details","Date of joining",
+        "Final Employment Status"
+    ]
+    for c in personal_cols:
+        print(f"{c:35} : {row.get(c, '')}")
+
+    # ---------------- ADDRESS DETAILS ----------------
+    print("\n🏠 ADDRESS DETAILS")
+    address_cols = [
+        "Address Type","AddressLine1","AddressLine2","AddressLine3",
+        "PIN","City","District","State","Country","Mobile No",
+        "LocalAddress","HomeAddress"
+    ]
+    for c in address_cols:
+        print(f"{c:35} : {row.get(c, '')}")
+
+    # ---------------- EDUCATION DETAILS ----------------
+    print("\n🎓 EDUCATION DETAILS")
+    edu_cols = [
+        "Edu Level","Specialization","Institute Name",
+        "Start Date","End Date","Is Highest Qualification"
+    ]
+    for c in edu_cols:
+        print(f"{c:35} : {row.get(c, '')}")
+
+    # ---------------- EMERGENCY CONTACT ----------------
+    print("\n🚨 EMERGENCY CONTACT")
+    emergency_cols = [
+        "Emergency Contact Number",
+        "Emergency Contact Relation",
+        "Emergency Contact Name"
+    ]
+    for c in emergency_cols:
+        print(f"{c:35} : {row.get(c, '')}")
+
+    # ---------------- ID DETAILS ----------------
+    print("\n🪪 ID DETAILS")
+    id_cols = [
+        "Passport-number","Passport-issuedate","Passport-issueplace","Passport-expiry",
+        "SponsorPassport-number","SponsorPassport-issuedate","SponsorPassport-issueplace","SponsorPassport-expiry",
+        "EmiratesID-number","EmiratesID-issuingdate","EmiratesID-expirydate",
+        "SponsorEmiratesID-number","SponsorEmiratesID-issuingdate","SponsorEmiratesID-expirydate",
+        "SponsorVisa-number","SponsorVisa-placeofissue","SponsorVisa-startdate","SponsorVisa-enddate",
+        "NOC-number","NOC-issuedate","NOC-expirydate",
+        "MedicalInsurance-number","MedicalInsurance-issuedate","MedicalInsurance-expirydate"
+    ]
+    for c in id_cols:
+        print(f"{c:35} : {row.get(c, '')}")
+
+    # ---------------- SALARY DETAILS ----------------
+    print("\n💰 SALARY DETAILS")
+    salary_cols = [
+        "Salary_Basic","Salary_HRA","Salary_Food",
+        "Salary_Transport","Salary_Telephone",
+        "Salary_Other","Salary_Variable",
+        "Salary_AnnualLeave","Salary_Airfare",
+        "Salary_EffectiveDate"
+    ]
+    for c in salary_cols:
+        print(f"{c:35} : {row.get(c, '')}")
+
+    print("=" * 100 + "\n")
