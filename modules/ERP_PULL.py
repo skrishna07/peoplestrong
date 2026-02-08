@@ -35,6 +35,8 @@ def ERP_to_PS_Pull():
             logging.info("-"*30)
             logging.info("Step 5: Processing ERP ID: %s", emp_id)
 
+            candidate_meta = []  # Collect metadata for all files of this candidate
+
             try:
                 url = f"{ERP_URL}?employee_ids={emp_id}"
                 headers = {'auth': AUTH_TOKEN}
@@ -90,7 +92,7 @@ def ERP_to_PS_Pull():
                         continue
 
                     logging.info("Step 8: Validating file '%s'", f_name)
-                    if not is_format_valid(f_name) or not is_size_valid(doc_res.content, f_name):
+                    if not is_format_valid(f_name):
                         logging.warning("Skipped file '%s': Invalid format or size", f_name)
                         stats["skipped"] += 1
                         pull_data.append({
@@ -106,10 +108,8 @@ def ERP_to_PS_Pull():
                     with sftp.open(f"{DOC_DIR}/{final_filename}", "wb") as out_f:
                         out_f.write(doc_res.content)
 
-                    meta_content = f"Candidate ID|Path|Filename|DocCode\n{emp_id}|{DOC_DIR}|{final_filename}|Labour Card"
-                    logging.info("Step 10: Writing metadata file to SFTP '%s/Meta_%s.csv'", INPUT_DIR, final_filename)
-                    with sftp.open(f"{INPUT_DIR}/Meta_{final_filename}.csv", "w") as m_f:
-                        m_f.write(meta_content)
+                    # Collect metadata
+                    candidate_meta.append(f"{emp_id}|{DOC_DIR}|{final_filename}|Labour Card")
 
                     stats["success"] += 1
                     pull_data.append({
@@ -118,6 +118,14 @@ def ERP_to_PS_Pull():
                         "Pull Status": "SUCCESS",
                         "BOT Comments": "File synced successfully"
                     })
+
+                # Step 10: Write a single metadata CSV for the candidate
+                if candidate_meta:
+                    meta_filename = f"{INPUT_DIR}/Meta_{emp_id}.csv"
+                    logging.info("Writing single metadata CSV for candidate: %s", meta_filename)
+                    with sftp.open(meta_filename, "w") as m_f:
+                        m_f.write("Candidate ID|Path|Filename|DocCode\n")
+                        m_f.write("\n".join(candidate_meta))
 
             except Exception as e:
                 logging.error("Error processing ERP ID %s: %s", emp_id, str(e))
