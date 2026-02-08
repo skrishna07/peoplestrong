@@ -16,7 +16,7 @@ mkdir -p logs
 echo "===== Starting PeopleStrong → ERP BOT at $(date) =====" | tee -a $LOG_FILE
 
 # Run the Python script and append both stdout and stderr to the log
-python3 -m  RPA_AUTOMATION.py 2>&1 | tee -a $LOG_FILE
+python3 -m  RPA_AUTOMATION 2>&1 | tee -a $LOG_FILE
 
 # Append finish timestamp
 echo "===== BOT Finished at $(date) =====" | tee -a $LOG_FILE
