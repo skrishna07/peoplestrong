@@ -1,12 +1,6 @@
 
 from libraries import *
-# def send_to_erp(erpid, payload):
-#     conn = http.client.HTTPSConnection(ERP_HOST)
-#     body = json.dumps({"data": {erpid: {"data": payload, "files": {}}}})
-#     headers = {"auth": AUTH_TOKEN, "Content-Type": "application/json"}
-#     conn.request("PUT", ERP_ENDPOINT, body=body, headers=headers)
-#     res = conn.getresponse()
-#     return res.status, res.read().decode()
+
 
 
 
@@ -62,17 +56,17 @@ def send_to_erp(erpid, payload_data, file_data=None):
             errors = res_json.get("upload_errors", {})
             if not errors:
                 logging.info(f"✅ Sync Success: {erpid}")
-                return True, ""
+                return "SUCCESS", "Synced Successfully"
             else:
-                # Map ERP errors into Excel
                 error_str = "; ".join([f"{k}: {', '.join(v)}" for k, v in errors.items()])
                 logging.warning(f"❌ Validation Failed for {erpid}: {error_str}")
-                return False, error_str
+                return "FAILED", error_str or f"Server Rejected {res.status}"
+
         else:
             logging.error(f"❌ Server Rejected {res.status}: {res_data}")
-            return False, f"Server Rejected {res.status}"
+            return "FAILED", f"Server Rejected {res.status}"
 
     except Exception as e:
         logging.error(f"❌ Connection Error: {str(e)}")
-        return False, str(e)
+        return "FAILED", str(e)
 
