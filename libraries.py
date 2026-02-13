@@ -11,7 +11,6 @@ import smtplib
 import http
 
 import tempfile
-import base64
 import logging
 import shutil
 from datetime import datetime
@@ -26,9 +25,16 @@ import time
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 import csv
-import os, re, io, json, time, logging, http.client
+import  http.client
 import pandas as pd
 from datetime import datetime
+
+
+from concurrent.futures import ThreadPoolExecutor
+import re
+import urllib.parse
+import json
+import base64
 # ------------------------------
 # Load environment variables
 # ------------------------------

@@ -1,0 +1,331 @@
+{
+  "Person-title_id|disp": "Title",
+  "Person-firstname": "First Name",
+  "Person-middlename": "Middle Name",
+  "Person-lastname": "Last Name",
+  "Person-gender_id|disp": "Gender",
+  "Person-mothername": "Mothers Name",
+  "Person-birthdate": "Birth Date",
+  "Person-maritalstatus_id|disp": "maritalstatus",
+  "Person-religion_id|disp": "Religion",
+  "Person-nationality_id|disp": "nationality",
+  "AltPhoneDetails": "Alt Phone ISD",
+  "AltPhone": "Alt Phone",
+  "Email": "Alt Email",
+
+  "Address-addresstype_id|disp": "Address Type",
+  "Address-line1": "AddressLine1",
+  "Address-line2": "AddressLine2",
+  "Address-line3": "AddressLine3",
+  "Address-zip": "PIN",
+  "Address-city": "City",
+  "Address-state": "State",
+  "Address-country_id|disp": "Country",
+  "LocalAddress": "LocalAddress",
+  "HomeAddress": "HomeAddress",
+
+  "Qualification-degreetype|disp": "Edu Level",
+  "Qualification-studymajor": "Specialization",
+  "Qualification-university": "Institute Name",
+  "Qualification-datefrom": "Start Date",
+  "Qualification-dateto": "End Date",
+  "EmpCustomization-is_highest": "Is Highest Qualification",
+
+  "EmergyPhone": "Emergency Contact Number",
+  "EmergyPhoneDetails": "Emergency Contact Relation + Name",
+
+  "Passport-number": "Passport-number",
+  "Passport-issuedate": "Passport-issuedate",
+  "Passport-issueplace": "Passport-issueplace",
+  "Passport-expiry": "Passport-expiry",
+
+  "SponsorPassport-number": "SponsorPassport-number",
+  "SponsorPassport-issuedate": "SponsorPassport-issuedate",
+  "SponsorPassport-issueplace": "SponsorPassport-issueplace",
+  "SponsorPassport-expiry": "SponsorPassport-expiry",
+
+  "EmiratesID-number": "EmiratesID-number",
+  "EmiratesID-issuingdate": "EmiratesID-issuingdate",
+  "EmiratesID-expirydate": "EmiratesID-expirydate",
+
+  "SponsorEmiratesID-number": "SponsorEmiratesID-number",
+  "SponsorEmiratesID-issuingdate": "SponsorEmiratesID-issuingdate",
+  "SponsorEmiratesID-expirydate": "SponsorEmiratesID-expirydate",
+
+  "SponsorVisa-number": "SponsorVisa-number",
+  "SponsorVisa-placeofissue": "SponsorVisa-placeofissue",
+  "SponsorVisa-startdate": "SponsorVisa-startdate",
+  "SponsorVisa-enddate": "SponsorVisa-enddate",
+
+  "NOC-number": "NOC-number",
+  "NOC-issuedate": "NOC-issuedate",
+  "NOC-expirydate": "NOC-expirydate",
+
+  "ILOEInsurance-empcompliance_id|disp": "MedicalInsurance-number",
+  "MedicalInsurance-issuedate": "MedicalInsurance-issuedate",
+  "ILOEInsurance-expirydate": "MedicalInsurance-expirydate",
+
+  "MOLOL-additionalclause": "Contract Clause",
+  "EmployeeContract-legalstatus_id": "Legal status",
+  "EmployeeContract-probationperiod": "Probation",
+  "EmployeeContract-noticeperiod": "Notice Period",
+  "EmployeeContract-empworkinghours": "working hours",
+  "EmployeeContract-worktype|disp": "work type",
+  "EmployeeContract-insuranceeligibiity_id|disp": "insurance eligibility",
+  "EmployeeContract-airfareeligibility|disp": "airfare eligibility",
+  "EmployeeContract-designation_id|disp": "client designation",
+  "EmployeeContract-clientauth": "client authorization details",
+  "EmployeeContract-startdate": "Date of joining",
+  "EmployeeContract-employeestatus_id|disp": "Final Employment Status",
+
+  "SalaryHead_Basic": "Salary_Basic",
+  "SalaryHead_HRA": "Salary_HRA",
+  "SalaryHead_Food": "Salary_Food",
+  "SalaryHead_Transport": "Salary_Transport",
+  "SalaryHead_Telephone": "Salary_Telephone",
+  "SalaryHead_Medical": "Salary_Medical",
+  "SalaryHead_Electricity": "Salary_Electricity",
+  "SalaryHead_Other Allowance": "Salary_Other",
+  "SalaryHead_Variable Allowance": "Salary_Variable",
+  "SalaryHead_Annual Leave Allowance": "Salary_AnnualLeave",
+  "SalaryHead_Airfare Allowance": "Salary_Airfare",
+  "Salary-startdate": "Salary_EffectiveDate",
+
+   "EmiratesID-copy": [
+      "Emirates_ID_copy",
+      "New_Emirates_ID_copy",
+      "Candidate_Emirates_Copy",
+      "eid_copy"
+    ],
+ 
+    "Person-photo": [
+      "Photo",
+      "Photograph",
+      "Candidate_Photo"
+    ],
+ 
+    "Person-cv": [
+      "Pre_Joining_Resume",
+      "Resume",
+      "CV"
+    ],
+ 
+    "Passport-scan": [
+      "Passport_Copy"
+    ],
+ 
+    "EmployeeContract-offerletter": [
+      "Offer_letter",
+      "Appointment_Letter_Contract"
+    ],
+ 
+    "EmployeeContract-codeofconductcopy": [
+      "Client_COC",
+      "NDA",
+      "Conflict_of_Interest"
+    ],
+ 
+    "EmployeeContract-joiningreportscan": [
+      "Joining_Report",
+      "DOJ_Report"
+    ],
+ 
+    "EmployeeContract-personalinfosheet": [
+      "Personal_Info_Sheet"
+    ],
+ 
+    "EntryVisa-visacopy": [
+      "Joining_E_Visa_Copy",
+      "Visa_Copy",
+      "residence_visa"
+    ],
+ 
+    "LaborContract-laborcardcopy": [
+      "Joining_LC","Joining_LC_AUH"
+    ],
+ 
+ 
+ 
+    "EmployeeContract-molofferletter": [
+      "Joining_MOL_Staff",
+      "MOL",
+      "MOL_Signed_and_upload"
+    ],
+ 
+    "EmployeeContract-cancellationcopy": [
+      "Imigration_cancellation",
+      "Labor_cancellation"
+    ],
+ 
+    "EmployeeContract-joiningundertaking": [
+      "DOJ_Confirmation_by_Staff",
+      "Bank_Undertaking",
+      "Passport_Undertaking",
+      "PNG_undertaking",
+      "EID_undertaking"
+    ],
+ 
+    "EmployeeContract-backgroundcheck": [
+      "AECB_certificate",
+      "Pre_Joining_Reference",
+      "Reference_Check"
+    ],
+ 
+    "EmpOLProcess-empexperienceletter": [
+      "Experience_Letter"
+    ],
+ 
+    "EmpOLProcess-clientauthorizationcopy": [
+      "Client_Authorization",
+      "Client_Authorization_Copy"
+    ],
+ 
+    "EmpOLProcess-referencecheckdocument": [
+      "Reference_Check",
+      "Pre_Joining_Reference"
+    ],
+ 
+    "EmpOLProcess-referencecheckdocument2": [
+      "Reference_Check_2"
+    ],
+ 
+    "EmpOLProcess-cidclearence": [
+      "CID_Clearance"
+    ],
+ 
+    "EmpUAEResidence-dewabillcopy": [
+      "DEWA_Bill",
+      "Utility_Bill"
+    ],
+ 
+    "EmpUAEResidence-ejaricert": [
+      "Ejari_Certificate"
+    ],
+ 
+    "EmpCustomization2-clawbackundertaking": [
+      "Clawback_Undertaking"
+    ],
+ 
+    "EmpCustomization2-trainingacknowledgement": [
+      "Training_Acknowledgement"
+    ],
+ 
+    "IAorTravel-iaemployeeundertaking": [
+      "IA_Undertaking"
+    ],
+ 
+    "IAorTravel-iainternalapprovalcopy": [
+      "IA_Internal_Approval"
+    ],
+ 
+    "IAorTravel-internalamendcashreceipt": [
+      "IA_Cash_Receipt"
+    ],
+ 
+    "IAorTravel-iadocuments": [
+      "Joining_Status_change_IA_document"
+    ],
+ 
+    "ILOEInsurance-copy": [
+      "ILOE_Insurance_Copy",
+      "Insurance_MAF_form"
+    ],
+ 
+    "LaborContractProcess-lctypedlaborcontractcopy": [
+      "Joining_AUH_-LC_Staff ","Joining_LC_Staff"
+    ],
+ 
+    "LaborContractProcess-signedlabourcontract": [
+      "Signed_Labour_Contract"
+    ],
+ 
+    "LaborContractProcess-lcretypingapproval": [
+      "LC_Retyping_Approval"
+    ],
+ 
+    "MOLOL-typedmolofferlcopy": [
+      "MOL_Typed_Offer_Letter"
+    ],
+ 
+    "MOLOL-signedmolofferletter": [
+      "MOL_Signed_Offer_Letter"
+    ],
+ 
+    "MOLOL-mololclientapproval": [
+      "MOL_Client_Approval"
+    ],
+ 
+    "MedicalCheck-medicalapplicationcopy": [
+      "Medical_Application"
+    ],
+ 
+    "MedicalCheck-medicalstampedapplicationcopy": [
+      "Medical_Stamped_Application"
+    ],
+ 
+    "MedicalCheck-medicalcrtscan": [
+      "Medical_Certificate"
+    ],
+ 
+    "MedicalCheck-medicalreceipt": [
+      "Medical_Receipt"
+    ],
+ 
+    "PreJoinVisa-entrystampvisitvisacopy": [
+      "Joining_Entry_Stamp"
+    ],
+ 
+    "Qualification-certfile": [
+      "Degree_Attested_Yes_upload_document_-_If_No_Click_on_NA",
+      "Education_Certificate"
+    ],
+ 
+    "ResidenceVisaProcess-urgentcostapprovalcopy": [
+      "Urgent_Cost_Approval"
+    ],
+ 
+    "ResidenceVisaProcess-visastampreceipt": [
+      "Visa_Stamp_Receipt"
+    ],
+    
+  "SponsorVisa-copy": [
+    "Sponsored_visa"
+  ],
+
+  "SponsorPassport-scan": [
+    "Sponsored_Passport"
+  ],
+
+  "EmployeeContract-sponsornocscan": [
+    "NOC_from_sponsored",
+    "Pre_Joining_NOC_from_the_Company"
+  ],
+
+  "EmiratesIDProcess-eidretyperegform": [
+    "Joining_-Stamped_Emirates_Application"
+  ],
+
+  "EmiratesIDProcess-emiratesidoldcopy": [
+    "Candidate_Visa_Copy_and_Emirates_Copy"
+  ],
+
+  "EmiratesIDProcess-eidundertaking": [
+    "Pre_Joining_EID_undertaking"
+  ],
+
+  "EmiratesIDProcess-eidregform": [
+    "Joining_Type_Emirates_ID_Application"
+  ],
+
+  "MedicalCheck-medicalcompletedate": [
+    "Joining_-Medical_Completion_Date"
+  ],
+
+  "PreJoinVisa-cancellationpaperscan": [
+    "Joining_Imigration_cancellation"
+  ],
+
+  "ResidenceVisa-copy": [
+    "Visa_Copy"
+  ]
+}

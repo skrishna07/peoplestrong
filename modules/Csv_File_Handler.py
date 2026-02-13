@@ -266,6 +266,9 @@ def build_master_dataframe(dfs):
     candidate_ids = mapping_df[JOIN_KEY].astype(str).str.strip().tolist()
     logging.info(f"[PHASE 3] Mapping loaded: {len(mapping_df)} candidates")
     print(f"[INFO] Today we got {len(mapping_df)} candidates in Mapping CSV")
+    print("\n[INFO] CandidateID | ERP ID")
+    for _, row in mapping_df.iterrows():
+        print(f"{row[JOIN_KEY]} | {row.get('ERP', 'N/A')}")
 
     # ---------------- HELPER: FILTER CANDIDATES ----------------
     def filter_candidates(df, name):

@@ -1,5 +1,5 @@
 # ============================================================
-# PEOPLESTRONG → ERP | FINAL PRODUCTION FILE 
+# PEOPLESTRONG → ERP | FINAL PRODUCTION FILE
 # ============================================================
 
 from libraries import *
@@ -11,8 +11,8 @@ from modules.Pending_Process import *
 from modules.Csv_File_Handler import *
 from api_handler.Ps_to_Erp_Requestor import send_to_erp
 from modules.Document_Base64_Generator import get_candidate_document_links
-
 from modules.SEND_EMAIL_SUMMARY import send_push_summary_email
+
 # ============================================================
 # CONFIG
 # ============================================================
@@ -128,16 +128,18 @@ def build_erp_payload(row):
     return payload
 
 
-from concurrent.futures import ThreadPoolExecutor
-
-def PS_to_ERP_Push():
+def PS_to_ERP_Push(db_conn=None):
     logging.info("===== PEOPLESTRONG → ERP START =====")
     logging.info(f"Job Started At: {datetime.now()}")
+
+    try:
+        init_db()
+    except Exception as e:
+        print("Database Not Initialized")
 
     ssh, sftp = get_sftp_connection()
     logging.info("[PHASE 1] SFTP connected")
 
-    # Load and prepare master dataframe
     dfs = load_csvs(sftp)
     master = build_master_dataframe(dfs)
     dump_df(master, "RPA_Master_File")
@@ -151,31 +153,55 @@ def PS_to_ERP_Push():
         logging.info("-" * 60)
         logging.info(f"[PHASE 5] Processing Candidate: {cid}")
 
+        pending = fetch_pending_candidates(db_conn=db_conn)
+        candidate_in_db = next((c for c in pending if c[0] == cid), None)
+
+        if candidate_in_db:
+            _, erpid_db, Text_payload, File_Payload, text_done, file_done, erp_done, last_status, comments = candidate_in_db
+            logging.info(f"[RESUME] Candidate {cid} found in DB. Resuming from last state.")
+        else:
+            Text_payload = File_Payload = None
+            text_done = file_done = erp_done = False
+
         if not erpid:
             logging.warning("[SKIP] ERPID missing — skipping candidate")
             push_data.append({
                 "CandidateID": cid,
-                "ERPID": erpid or "N/A",
+                "ERPID": "N/A",
                 "status": "FAILED",
                 "comments": "Missing ERPID — skipped"
             })
             continue
 
-        # ================= ADDRESS SNAPSHOT =================
         print_peoplestrong_snapshot(r)
 
-        # ================= PARALLEL PAYLOAD AND DOCUMENT FETCH =================
         try:
-            with ThreadPoolExecutor(max_workers=2) as executor:
-                future_text = executor.submit(build_erp_payload, r)
-                future_docs = executor.submit(get_candidate_document_links, cid)
+            if not Text_payload or not File_Payload:
+                with ThreadPoolExecutor(max_workers=2) as executor:
+                    future_text = executor.submit(build_erp_payload, r)
+                    future_docs = executor.submit(get_candidate_document_links, cid)
 
-                Text_payload = future_text.result()
-                File_Payload = future_docs.result()
+                    Text_payload = future_text.result()
+                    File_Payload = future_docs.result()
+
+                save_to_queue(
+                    candidate_id=cid,
+                    erpid=erpid,
+                    text_payload=Text_payload,
+                    file_payload=File_Payload,
+                    db_conn=db_conn
+                )
 
             logging.info("[PHASE 6] Text payload and document links ready")
         except Exception as e:
             logging.error(f"[ERROR] Failed to prepare payload/docs for {cid}: {e}")
+            save_to_queue(
+                candidate_id=cid,
+                erpid=erpid,
+                status="FAILED",
+                comments=f"Payload/Document prep failed: {str(e)}",
+                db_conn=db_conn
+            )
             push_data.append({
                 "CandidateID": cid,
                 "ERPID": erpid,
@@ -184,19 +210,36 @@ def PS_to_ERP_Push():
             })
             continue
 
-        # ================= ERP PUSH =================
         try:
-            status, resp = send_to_erp(erpid, payload_data=Text_payload, file_data=File_Payload)
-            bot_comment = "Synced Successfully" if status == "SUCCESS" else f"Failed: {resp}"
+            if not erp_done:
+                status, resp = send_to_erp(erpid, payload_data=Text_payload, file_data=File_Payload)
+                bot_comment = "Synced Successfully" if status == "SUCCESS" else f"Failed: {resp}"
 
-            logging.info(f"[PHASE 7] ERP Status={status} | ERPID={erpid}")
-            print(f"[PHASE 7] ERP Response: {resp}")
+                save_to_queue(
+                    candidate_id=cid,
+                    erp_done=True if status == "SUCCESS" else False,
+                    status=status,
+                    comments=bot_comment,
+                    db_conn=db_conn
+                )
+
+                logging.info(f"[PHASE 7] ERP Status={status} | ERPID={erpid}")
+                print(f"[PHASE 7] ERP Response: {resp}")
+            else:
+                logging.info(f"[SKIP] ERP already done for {cid}")
+                status = "SUCCESS"
+                bot_comment = "Already Synced"
         except Exception as e:
             logging.error(f"[ERROR] ERP push failed for {erpid}: {e}")
             status = "FAILED"
             bot_comment = f"ERP push exception: {str(e)}"
+            save_to_queue(
+                candidate_id=cid,
+                status=status,
+                comments=bot_comment,
+                db_conn=db_conn
+            )
 
-        # ================= COLLECT PUSH DATA =================
         push_data.append({
             "CandidateID": cid,
             "ERPID": erpid,
@@ -204,7 +247,6 @@ def PS_to_ERP_Push():
             "comments": bot_comment
         })
 
-    # ================= SEND SUMMARY EMAIL =================
     try:
         send_push_summary_email(push_data)
         logging.info(f"[SUMMARY] Sent summary email for {len(push_data)} candidates")
