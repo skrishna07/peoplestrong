@@ -1,6 +1,6 @@
 from modules.Helpers import log_event  
 from libraries import *
-
+from email.header import Header
 
 # =====================================================
 # Core SMTP Engine
@@ -17,7 +17,8 @@ def send_smtp_email(subject, html_body):
         msg = MIMEMultipart()
         msg['From'] = SENDER_EMAIL
         msg['To'] = RECIPIENTS
-        msg['Subject'] = subject
+        # msg['Subject'] = subject
+        msg['Subject'] = Header(subject, 'utf-8') 
         msg.attach(MIMEText(html_body, 'html'))
 
         log_event(f"Attempting to send SMTP email: {subject}")
@@ -58,6 +59,59 @@ def send_smtp_email(subject, html_body):
 # =====================================================
 # Summary Functions (Business Logic)
 # =====================================================
+
+
+
+def send_mapping_alert_email(mapping_file_name, missing_ids=None):
+    """
+    Sends an alert email for Mapping CSV issues.
+
+    Scenarios handled:
+    1. No candidate IDs at all → missing_ids=None
+    2. Some IDs present but ERP or PeopleStrong IDs missing → missing_ids=list of IDs
+    """
+
+    today_str = datetime.now().strftime('%d-%m-%Y')
+    subject = f"PeopleStrong <> ERP Mapping Alert | {today_str}"
+
+    if missing_ids is None:
+        # Scenario 1: No candidate IDs in the mapping file
+        body = f"""
+        <html>
+        <body style="font-family:Calibri, sans-serif; font-size:14px; color:#333;">
+            <p>Dear Team,</p>
+            <p>The Mapping file <b>{mapping_file_name}</b> was received but contains <b>no candidate IDs</b>.</p>
+            <p><b>Automation stopped</b> due to missing candidate IDs in the mapping file.</p>
+            <p>Regards,<br><b>RPA BOT</b></p>
+        </body>
+        </html>
+        """
+    else:
+        # Scenario 2: Some IDs missing ERP or PeopleStrong IDs
+        missing_rows = "".join([f"<tr><td>{cid}</td></tr>" for cid in missing_ids])
+        body = f"""
+        <html>
+        <body style="font-family:Calibri, sans-serif; font-size:14px; color:#333;">
+            <p>Dear Team,</p>
+            <p>The Mapping file <b>{mapping_file_name}</b> contains candidate IDs, but the following IDs are missing ERP or PeopleStrong IDs:</p>
+            <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse; font-family:Calibri; font-size:13px; width:40%; text-align:center;">
+                <tr style="background-color:#f4cccc;">
+                    <th>Candidate IDs with Missing Mapping</th>
+                </tr>
+                {missing_rows}
+            </table>
+            <p><b>Automation stopped</b> for these IDs because relevant mapping fields are missing.</p>
+            <p>Regards,<br><b>RPA BOT</b></p>
+        </body>
+        </html>
+        """
+
+    # Execute send
+    if send_smtp_email(subject, body):
+        logging.info(f"[ALERT] Mapping alert email sent successfully for {mapping_file_name}")
+    else:
+        logging.error(f"[ALERT] Failed to send mapping alert email for {mapping_file_name}")
+
 
 def send_push_summary_email(push_data):
     """Generates HTML for PeopleStrong to ERP Push and sends via SMTP."""
@@ -102,49 +156,6 @@ def send_push_summary_email(push_data):
     else:
         print(f"ERROR: Failed to send {subject}.")
 
-# def send_pull_summary_email(pull_data, subject=None):
-#     """Generates HTML for ERP to PeopleStrong Pull and sends via SMTP."""
-    
-#     if not subject:
-#         subject = f"ERP to PeopleStrong Pull Summary | {datetime.now().strftime('%d-%m-%Y')}"
-
-#     def build_html_table(data):
-#         if not data: 
-#             return "<p>No records available</p>"
-            
-#         headers = ["Candidate ID", "Data Extracted (files)", "Pull Status", "BOT Comments"]
-#         rows = ""
-#         for row in data:
-#             rows += "<tr>" + "".join(f"<td>{row.get(h,'')}</td>" for h in headers) + "</tr>"
-
-#         return f"""
-#         <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse; font-family:Calibri; font-size:13px;">
-#             <tr style="background-color:#d9e1f2;">
-#                 {''.join(f'<th>{h}</th>' for h in headers)}
-#             </tr>
-#             {rows}
-#         </table>
-#         """
-
-#     pull_table = build_html_table(pull_data)
-    
-#     body = f"""
-#     <html>
-#     <body>
-#         <p>Dear Team,</p>
-#         <p>BOT successfully completed the ERP → PeopleStrong pull.</p>
-#         <h3>ERP to PeopleStrong Pull Candidate Data</h3>
-#         {pull_table}
-#         <p>Regards,<br><b>RPA BOT</b></p>
-#     </body>
-#     </html>
-#     """
-
-#     # Execute Send
-#     if send_smtp_email(subject, body):
-#         print(f"INFO: {subject} triggered successfully.")
-#     else:
-#         print(f"ERROR: Failed to send {subject}.")
 
 
 def send_pull_summary_email(pull_data, subject=None):

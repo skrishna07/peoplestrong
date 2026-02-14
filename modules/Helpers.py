@@ -1,4 +1,10 @@
 from libraries import *
+
+
+
+STATUS_PENDING = "PENDING"
+STATUS_FAILED = "FAILED"
+STATUS_SUCCESS = "SUCCESS"
 # =====================================================
 # Helper functions for SFTP
 # =====================================================
@@ -31,19 +37,39 @@ def get_sftp_connection():
     ssh.connect(os.environ["SFTP_HOST"], port=2222, username=os.environ["SFTP_USER"], password=os.environ["SFTP_PASS"])
     return ssh, ssh.open_sftp()
 
+# def safe_archive_file(sftp, source_path, archive_dir):
+#     filename = os.path.basename(source_path)
+#     target_path = f"{archive_dir}/{filename}"
+#     try:
+#         sftp.stat(archive_dir)
+#     except IOError:
+#         sftp.mkdir(archive_dir)
+#     try:
+#         sftp.remove(target_path)
+#     except IOError:
+#         pass
+#     sftp.rename(source_path, target_path)
+
 def safe_archive_file(sftp, source_path, archive_dir):
+    import io
+
     filename = os.path.basename(source_path)
     target_path = f"{archive_dir}/{filename}"
+
+    # Ensure archive directory exists
     try:
         sftp.stat(archive_dir)
     except IOError:
         sftp.mkdir(archive_dir)
-    try:
-        sftp.remove(target_path)
-    except IOError:
-        pass
-    sftp.rename(source_path, target_path)
 
+    # Copy file content instead of moving
+    with sftp.open(source_path, "rb") as src_file:
+        file_data = src_file.read()
+
+    with sftp.open(target_path, "wb") as tgt_file:
+        tgt_file.write(file_data)
+
+    print(f"[ARCHIVE] Copied {filename} to {archive_dir}")
 
 
 

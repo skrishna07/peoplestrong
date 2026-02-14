@@ -38,6 +38,67 @@ def robust_pipe_reader(file_obj):
     return pd.DataFrame(data[1:], columns=data[0], dtype=str)
 
 
+# def load_csvs(sftp):
+#     prefixes = [
+#         "CandidateData",
+#         "CandidateContact",
+#         "CandidateEducation",
+#         "CandidateEmergencyContact",
+#         "CandidateIDDetails",
+#         "CandidateSalaryData",
+#         "Mapping"
+#     ]
+
+#     files = sftp.listdir(IMPORT_DIR)
+#     dfs = {}
+#     source_files = []
+
+#     logging.info("[PHASE 2] Loading PeopleStrong CSVs")
+
+#     batch_date = None
+#     mapping_file = None
+
+#     for p in prefixes:
+#         f = latest_file(files, p)
+#         if not f:
+#             raise RuntimeError(f"Missing mandatory CSV: {p}")
+
+#         source_files.append(f)  # collect all loaded files
+
+#         if p == "Mapping":
+#             mapping_file = f
+#             # extract batch date from Mapping filename: Mapping_05112025_000124.csv
+#             m = re.match(r"Mapping_(\d{8})_\d{6}\.csv", f)
+#             if m:
+#                 batch_date = datetime.strptime(m.group(1), "%d%m%Y").date()
+
+#         sftp_path = f"{IMPORT_DIR}/{f}"
+#         logging.info(f"[PHASE 2] Reading file: {f} → {sftp_path}")
+
+#         if p == "CandidateContact":
+#             with sftp.open(sftp_path, "rb") as fh:
+#                 df = robust_pipe_reader(fh)
+#         else:
+#             with sftp.open(sftp_path, "rb") as fh:
+#                 df = pd.read_csv(io.BytesIO(fh.read()), sep="|", dtype=str)
+
+#         df.columns = df.columns.str.strip()
+
+#         if p == "Mapping":
+#             df = df.rename(columns={"PeopleStrongID": JOIN_KEY})
+
+#         if JOIN_KEY not in df.columns:
+#             raise RuntimeError(f"{p} missing {JOIN_KEY}")
+
+#         dfs[p] = df
+#         logging.info(f"[PHASE 2] {p} rows loaded: {len(df)}")
+
+#     logging.info("[PHASE 2] All CSV files loaded successfully")
+
+#     return dfs, batch_date, mapping_file, source_files
+
+
+
 def load_csvs(sftp):
     prefixes = [
         "CandidateData",
@@ -51,13 +112,34 @@ def load_csvs(sftp):
 
     files = sftp.listdir(IMPORT_DIR)
     dfs = {}
+    source_files = []
 
     logging.info("[PHASE 2] Loading PeopleStrong CSVs")
 
+    # ---------------- STEP 1: Pick latest Mapping ----------------
+    mapping_file = latest_file(files, "Mapping")
+    if not mapping_file:
+        raise RuntimeError("No Mapping file found")
+
+    m = re.match(r"Mapping_(\d{8})_\d{6}\.csv", mapping_file)
+    if not m:
+        raise RuntimeError("Invalid Mapping filename format in Mapping CSV")
+
+    batch_date_str = m.group(1)  # e.g., '14022026'
+    batch_date = datetime.strptime(batch_date_str, "%d%m%Y").date()
+    logging.info(f"[PHASE 2] Selected batch date: {batch_date_str}")
+
+    # ---------------- STEP 2: Filter all files for this batch ----------------
+    batch_files = [f for f in files if batch_date_str in f]
+
+    # ---------------- STEP 3: Load files per prefix ----------------
     for p in prefixes:
-        f = latest_file(files, p)
-        if not f:
-            raise RuntimeError(f"Missing mandatory CSV: {p}")
+        matched = [f for f in batch_files if f.startswith(p)]
+        if not matched:
+            raise RuntimeError(f"Missing {p} file for batch {batch_date_str}")
+        f = matched[0]  # pick the file
+
+        source_files.append(f)
 
         sftp_path = f"{IMPORT_DIR}/{f}"
         logging.info(f"[PHASE 2] Reading file: {f} → {sftp_path}")
@@ -81,7 +163,8 @@ def load_csvs(sftp):
         logging.info(f"[PHASE 2] {p} rows loaded: {len(df)}")
 
     logging.info("[PHASE 2] All CSV files loaded successfully")
-    return dfs
+
+    return dfs, batch_date, mapping_file, source_files
 
 
 def dump_df(df, name):
@@ -92,159 +175,6 @@ def dump_df(df, name):
 
 
 
-
-# def build_master_dataframe(dfs):
-#     """
-#     Builds the master DataFrame by merging all relevant candidate data.
-#     Normalizes education, ID, and salary.
-#     Integrates primary address and main ID details directly into the master.
-#     """
-#     logging.info("[PHASE 3] Normalizing datasets")
-
-#     # ---------------- EDUCATION ----------------
-#     edu_df = dfs.get("CandidateEducation")
-#     if edu_df is not None:
-#         edu_df = normalize_education(edu_df)
-#         logging.info(f"[PHASE 3] Education normalized: {len(edu_df)} rows")
-#     else:
-#         edu_df = pd.DataFrame(columns=[JOIN_KEY, "Edu Level", "Specialization",
-#                                        "Institute Name", "Start Date", "End Date", "Is Highest Qualification"])
-
-#     # ---------------- ID DETAILS ----------------
-#     id_df = dfs.get("CandidateIDDetails")
-#     if id_df is not None:
-#         id_df = normalize_id(id_df)
-#         logging.info(f"[PHASE 3] ID details normalized: {len(id_df)} rows")
-#         # Pick main ID for each candidate
-#         id_main_df = id_df.groupby(JOIN_KEY).apply(lambda grp: select_id_type(grp, grp.name))
-#         id_main_df = id_main_df.reset_index(drop=True)
-
-#     else:
-#         id_df = pd.DataFrame(columns=[JOIN_KEY])
-
-#     # ---------------- SALARY ----------------
-#     sal_df = dfs.get("CandidateSalaryData")
-#     if sal_df is not None:
-#         sal_df = normalize_salary(sal_df)
-#         logging.info(f"[PHASE 3] Salary normalized: {len(sal_df)} rows")
-#     else:
-#         sal_df = pd.DataFrame(columns=[JOIN_KEY])
-
-#     # ---------------- MERGE CORE DATA ----------------
-#     logging.info("[PHASE 4] Merging core datasets into master DataFrame")
-#     master = dfs["CandidateData"].copy()
-#     master = (
-#         master
-#         .merge(edu_df, on=JOIN_KEY, how="left")
-#         .merge(dfs.get("CandidateEmergencyContact", pd.DataFrame(columns=[JOIN_KEY])), on=JOIN_KEY, how="left")
-#         .merge(id_df, on=JOIN_KEY, how="left")
-#         .merge(sal_df, on=JOIN_KEY, how="left")
-#         .merge(dfs.get("Mapping", pd.DataFrame(columns=[JOIN_KEY])), on=JOIN_KEY, how="inner")
-#     )
-
-#     # ---------------- PRIMARY ADDRESS ----------------
-#     address_df = dfs.get("CandidateContact")
-#     if address_df is not None and not address_df.empty:
-#         primary_address_rows = address_df.groupby(JOIN_KEY).apply(lambda grp: select_primary_address(grp, grp.name))
-#         master = master.merge(primary_address_rows.reset_index(drop=True), on=JOIN_KEY, how="left")
-#         logging.info(f"[PHASE 4] Primary addresses merged: {len(primary_address_rows)} rows")
-#     else:
-#         logging.warning("[PHASE 4] CandidateContact CSV missing or empty")
-
-#     # ---------------- FINAL MASTER READY ----------------
-#     logging.info(f"[PHASE 4] Master DataFrame ready: {len(master)} rows")
-#     return master
-
-
-
-# def build_master_dataframe(dfs):
-#     """
-#     Builds the master DataFrame by merging all relevant candidate data.
-#     Only candidates present in the Mapping CSV will be included.
-#     Normalizes education, ID, and salary.
-#     Integrates primary address and main ID details directly into the master.
-#     """
-#     logging.info("[PHASE 3] Normalizing datasets")
-
-#     # ---------------- EDUCATION ----------------
-#     edu_df = dfs.get("CandidateEducation")
-#     if edu_df is not None:
-#         edu_df = normalize_education(edu_df)
-#         logging.info(f"[PHASE 3] Education normalized: {len(edu_df)} rows")
-#     else:
-#         edu_df = pd.DataFrame(
-#             columns=[
-#                 JOIN_KEY, "Edu Level", "Specialization",
-#                 "Institute Name", "Start Date", "End Date", "Is Highest Qualification"
-#             ]
-#         )
-
-#     # ---------------- ID DETAILS ----------------
-#     id_df = dfs.get("CandidateIDDetails")
-#     if id_df is not None:
-#         id_df = normalize_id(id_df)
-#         logging.info(f"[PHASE 3] ID details normalized: {len(id_df)} rows")
-#         # Pick main ID for each candidate
-#         id_main_df = (
-#             id_df.groupby(JOIN_KEY)
-#             .apply(lambda grp: select_id_type(grp, grp.name))
-#             .reset_index(drop=False)
-#         )
-#         logging.info(f"[PHASE 3] Main ID selected for candidates: {len(id_main_df)} rows")
-#     else:
-#         id_main_df = pd.DataFrame(columns=[JOIN_KEY])
-
-#     # ---------------- SALARY ----------------
-#     sal_df = dfs.get("CandidateSalaryData")
-#     if sal_df is not None:
-#         sal_df = normalize_salary(sal_df)
-#         logging.info(f"[PHASE 3] Salary normalized: {len(sal_df)} rows")
-#     else:
-#         sal_df = pd.DataFrame(columns=[JOIN_KEY])
-
-#     # ---------------- MAPPING ----------------
-#     mapping_df = dfs.get("Mapping")
-#     if mapping_df is None or mapping_df.empty:
-#         raise RuntimeError("Mapping CSV is missing or empty!")
-#     # Ensure column names are standardized
-#     mapping_df = mapping_df.rename(columns={"PeopleStrongID": JOIN_KEY})
-#     logging.info(f"[PHASE 3] Mapping loaded: {len(mapping_df)} rows")
-
-#     # ---------------- MERGE CORE DATA ----------------
-#     logging.info("[PHASE 4] Merging core datasets into master DataFrame")
-
-#     # Start with CandidateData
-#     master = dfs["CandidateData"].copy()
-#     # STRICTLY include only candidates in Mapping
-#     master = master.merge(mapping_df, on=JOIN_KEY, how="inner")
-
-#     # Merge other optional datasets
-#     master = (
-#         master
-#         .merge(edu_df, on=JOIN_KEY, how="left")
-#         .merge(dfs.get("CandidateEmergencyContact", pd.DataFrame(columns=[JOIN_KEY])), on=JOIN_KEY, how="left")
-#         .merge(id_main_df, on=JOIN_KEY, how="left")
-#         .merge(sal_df, on=JOIN_KEY, how="left")
-#     )
-
-#     # ---------------- PRIMARY ADDRESS ----------------
-#     address_df = dfs.get("CandidateContact")
-#     if address_df is not None and not address_df.empty:
-#         primary_address_rows = (
-#             address_df.groupby(JOIN_KEY)
-#             .apply(lambda grp: select_primary_address(grp, grp.name))
-#             .reset_index(drop=True)
-#         )
-#         master = master.merge(primary_address_rows, on=JOIN_KEY, how="left")
-#         logging.info(f"[PHASE 4] Primary addresses merged: {len(primary_address_rows)} rows")
-#     else:
-#         logging.warning("[PHASE 4] CandidateContact CSV missing or empty")
-
-#     # ---------------- REMOVE DUPLICATES ----------------
-#     master = master.drop_duplicates(subset=[JOIN_KEY])
-#     logging.info(f"[PHASE 4] Master DataFrame ready: {len(master)} rows")
-
-#     return master
 
 
 
@@ -266,9 +196,6 @@ def build_master_dataframe(dfs):
     candidate_ids = mapping_df[JOIN_KEY].astype(str).str.strip().tolist()
     logging.info(f"[PHASE 3] Mapping loaded: {len(mapping_df)} candidates")
     print(f"[INFO] Today we got {len(mapping_df)} candidates in Mapping CSV")
-    print("\n[INFO] CandidateID | ERP ID")
-    for _, row in mapping_df.iterrows():
-        print(f"{row[JOIN_KEY]} | {row.get('ERP', 'N/A')}")
 
     # ---------------- HELPER: FILTER CANDIDATES ----------------
     def filter_candidates(df, name):
