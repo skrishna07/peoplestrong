@@ -198,20 +198,37 @@ def PS_to_ERP_Push(db_conn=None):
 
         push_data.append({"CandidateID": cid, "ERPID": erpid, "status": status, "comments": bot_comment})
 
-        logging.info("[STEP 5] Archiving files...")
-        for f_name in source_file:
-                try:
-                    safe_archive_file(sftp, f"{IMPORT_DIR}/{f_name}", ARCHIVE_DIR)
-                    logging.info("Archived: %s", f_name)
-                except Exception as e:
-                    logging.error("ARCHIVE ERROR: %s", str(e))
+     
+    # ================== ARCHIVE BATCH FILES ==================
+    all_completed = all(
+    item["status"] in (STATUS_SUCCESS, STATUS_FAILED)
+    for item in push_data
+)
 
-    # ------------------- Send Summary Email -------------------
-    try:
-        send_push_summary_email(push_data)
-        logging.info(f"[SUMMARY] Sent summary email for {len(push_data)} candidates")
-    except Exception as e:
-        logging.error("Failed to send summary email: %s", str(e))
+    if push_data:
+        if all_completed:
+            logging.info("[ARCHIVE] All candidates processed. Moving batch files to COMPLETED archive...")
+            move_mode = True
+        else:
+            logging.info("[ARCHIVE] Some candidates still pending. Copying files to archive (keeping originals)...")
+            move_mode = False
+
+        for f_name in source_file:
+            try:
+                safe_archive_file(
+                    sftp,
+                    f"{IMPORT_DIR}/{f_name}",
+                    ARCHIVE_DIR,
+                    move_file=move_mode
+                )
+                action = "Moved" if move_mode else "Copied"
+                logging.info("[ARCHIVE] %s: %s", action, f_name)
+
+            except Exception as e:
+                logging.error("[ARCHIVE ERROR] %s", str(e))
+    else:
+        logging.warning("[ARCHIVE] No candidates processed. Skipping archive.")
+
 
     # ------------------- Close SFTP -------------------
     try:
