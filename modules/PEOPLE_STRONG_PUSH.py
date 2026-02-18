@@ -9,54 +9,73 @@ from modules.Files_Field_Validator import *
 from modules.Sql_Helper import *
 from modules.Pending_Process import *
 from modules.Csv_File_Handler import *
-from api_handler.Ps_to_Erp_Requestor import send_to_erp
+from api_handler.Ps_to_Erp_Requestor import send_to_erp,is_erp_id_valid
 from modules.Document_Base64_Generator import get_candidate_document_links
-from modules.SEND_EMAIL_SUMMARY import send_push_summary_email,send_mapping_alert_email,send_smtp_email
+from modules.SEND_EMAIL_SUMMARY import send_push_summary_email, send_mapping_alert_email, send_smtp_email,send_erp_error_summary,send_no_data_alert
 from modules.Pending_Process import Push_Pending
 from modules.ERP_Builder import build_erp_payload
-
-# ============================================================
-# CONFIG
-# ============================================================
+from concurrent.futures import ThreadPoolExecutor
+import json
 
 REPORT_FILE = "PeopleStrong_Master_Report.xlsx"
 
 
+# =================== Helper Functions =====================
+
+def archive_batch_files(sftp, files, move_file=True):
+    for f_name in files:
+        try:
+            safe_archive_file(sftp, f"{IMPORT_DIR}/{f_name}", ARCHIVE_DIR, move_file=move_file)
+            logging.info("[ARCHIVE] %s: %s", "Moved" if move_file else "Copied", f_name)
+        except Exception as e:
+            logging.error("[ARCHIVE ERROR] %s", str(e))
+
+
+def record_pending_ids(db_conn, candidate_ids, reason="No candidate data found — pending for future processing"):
+    for cid in candidate_ids:
+        save_to_queue(
+            candidate_id=cid,
+            erpid="N/A",
+            overall_status=STATUS_PENDING,
+            comments=reason,
+            db_conn=db_conn
+        )
 
 
 
+
+
+
+
+
+# =================== Main Function ========================
 
 def PS_to_ERP_Push(db_conn=None):
-    """
-    Main automation function to push candidate data from PeopleStrong to ERP,
-    tracking progress in SQLite pending_sync table.
-    """
     logging.info("===== PEOPLESTRONG → ERP START =====")
     logging.info(f"Job Started At: {datetime.now()}")
 
-    # ------------------- Initialize DB -------------------
+    # ------------------- Phase 1: Initialize DB -------------------
     try:
         init_db(db_conn=db_conn)
     except Exception as e:
         logging.error("[DB] Database initialization failed: %s", str(e))
         print("Database Not Initialized")
 
-    # ------------------- Connect SFTP -------------------
+    # ------------------- Phase 2: Connect SFTP -------------------
     try:
         ssh, sftp = get_sftp_connection()
-        logging.info("[PHASE 1] SFTP connected")
+        logging.info("[PHASE 2] SFTP connected")
     except Exception as e:
         logging.error("[SFTP] Connection failed: %s", str(e))
         return
-    
 
     try:
         Push_Pending()
     except Exception as e:
-        print(e)
+        logging.error(f"[PENDING] Failed to process pending queue: {e}")
 
-    # ------------------- Load CSVs -------------------
-    logging.info("===== PEOPLESTRONG → ERP  LIVE START =====")
+    # ------------------- Phase 3: Load CSVs -------------------
+    logging.info("[PHASE 3] Loading CSVs...")
     try:
         dfs, batch_date, mapping_file, source_file = load_csvs(sftp)
         mapping_df = dfs.get("Mapping")
@@ -65,18 +84,12 @@ def PS_to_ERP_Push(db_conn=None):
         ssh.close()
         return
 
-    # ------------------- Mapping Validation -------------------
+    # ------------------- Phase 4: Validate Mapping -------------------
     if mapping_df is None or mapping_df.empty:
         logging.warning("[ALERT] Mapping CSV is empty or missing candidate IDs. Automation stopped.")
         send_mapping_alert_email(mapping_file_name=str(mapping_file), missing_ids=None)
         logging.info("[ARCHIVE] Archiving invalid mapping batch...")
-        print("sourcefiles",source_file)
-        for f_name in source_file:
-            try:
-                safe_archive_file(sftp, f"{IMPORT_DIR}/{f_name}", ARCHIVE_DIR)
-                logging.info("Archived: %s", f_name)
-            except Exception as e:
-                logging.error("ARCHIVE ERROR: %s", str(e))
+        archive_batch_files(sftp, source_file, move_file=True)
         sftp.close()
         ssh.close()
         return
@@ -88,130 +101,86 @@ def PS_to_ERP_Push(db_conn=None):
     if missing_ids:
         logging.warning(f"[ALERT] {len(missing_ids)} candidate IDs missing mapping fields.")
         send_mapping_alert_email(mapping_file_name=mapping_file, missing_ids=missing_ids)
-        logging.info("[ARCHIVE] Archiving invalid mapping batch...")
-        print("sourcefiles",source_file)
-        for f_name in source_file:
-            try:
-                safe_archive_file(sftp, f"{IMPORT_DIR}/{f_name}", ARCHIVE_DIR)
-                logging.info("Archived: %s", f_name)
-            except Exception as e:
-                logging.error("ARCHIVE ERROR: %s", str(e))
+        archive_batch_files(sftp, source_file, move_file=True)
 
-    # ------------------- Build Master DataFrame -------------------
+    # ------------------- Phase 5: Build Master DataFrame -------------------
     master = build_master_dataframe(dfs)
-    dump_df(master, "RPA_Master_File")
+    # ------------------- Phase 5a: Safety Check on IDs -------------------
+    if not master.empty:
+        logging.info("[SAFETY CHECK] Verifying PeopleStrong IDs and ERP IDs")
 
+        # Check PeopleStrongID format
+        invalid_ps_ids = master[~master[JOIN_KEY].astype(str).str.startswith("PH")]
+        if not invalid_ps_ids.empty:
+            logging.warning(f"[ALERT] {len(invalid_ps_ids)} PeopleStrong IDs do not start with 'PH'. Please verify these IDs:")
+            print(invalid_ps_ids[[JOIN_KEY, "ERPID"]])
+
+        # Ensure ERPID exists for every row
+        if "ERPID" not in master.columns:
+            master["ERPID"] = "N/A"
+        else:
+            master["ERPID"] = master["ERPID"].fillna("N/A").astype(str).str.strip()
+
+        logging.info(f"[SAFETY CHECK] ERP IDs verified for {len(master)} candidates")
+
+        dump_df(master, "RPA_Master_File")  
+    all_mapping_ids = mapping_df[JOIN_KEY].tolist()
 
     if master.empty:
         logging.warning("[ALERT] Mapping present but no matching candidate data found.")
-
-        unmapped_ids = mapping_df[JOIN_KEY].tolist()
-
-        subject = f"PeopleStrong to  ERP Alert | No Matching Data | {datetime.now().strftime('%d-%m-%Y')}"
-
-        # Build ID rows
-        id_rows = "".join(
-            [f"<tr><td>{cid}</td></tr>" for cid in unmapped_ids]
-        )
-
-        html_body = f"""
-        <html>
-        <body style="font-family:Calibri; font-size:14px;">
-            <p>Dear Team,</p>
-
-            <p>
-            The Mapping file <b>{mapping_file}</b> contains 
-            <b>{len(unmapped_ids)}</b> candidate ID(s), 
-            but no matching records were found in <b>CandidateData</b>.
-            </p>
-
-            <h3 style="color:#c00000;">Candidate Data Not Found</h3>
-
-
-            <table border="1" cellpadding="6" cellspacing="0"
-                style="border-collapse:collapse; width:40%; text-align:center;">
-                <tr style="background-color:#f4cccc;">
-                    <th>Candidate ID</th>
-                </tr>
-                {id_rows}
-            </table>
-
-            <p>
-            <b>Reason:</b> CandidateData file was empty or did not contain matching records.
-            </p>
-
-            <p>
-            Batch files have been archived.
-            </p>
-
-            <p>Regards,<br><b>RPA BOT</b></p>
-        </body>
-        </html>
-        """
-
-        # Send directly
-        send_smtp_email(subject, html_body)
-
-        # -------- Archive --------
-        for f_name in source_file:
-            safe_archive_file(
-                sftp,
-                f"{IMPORT_DIR}/{f_name}",
-                ARCHIVE_DIR,
-                move_file=True
-            )
-
+        send_no_data_alert(mapping_file, all_mapping_ids)
+        record_pending_ids(db_conn, all_mapping_ids)
+        archive_batch_files(sftp, source_file, move_file=True)
         sftp.close()
         ssh.close()
         logging.info("===== PROCESS COMPLETE =====")
         return
 
-
+    # ------------------- Phase 6: Process Candidates -------------------
     push_data = []
-
-    # ------------------- Process Candidates -------------------
     for _, r in master.iterrows():
         cid = r[JOIN_KEY]
         erpid = safe(r.get("ERPID"))
 
         logging.info("-" * 60)
-        logging.info(f"[PHASE 5] Processing Candidate: {cid}")
+        logging.info(f"[PHASE 6] Processing Candidate: {cid}")
 
-        # Fetch pending candidates from DB
+        # ------------------- Phase 6a: ERP ID Validation -------------------
+        if not erpid or not is_erp_id_valid(erpid):
+            logging.warning(f"[SKIP] ERPID invalid or not found in ERP — skipping candidate: {cid} | ERPID: {erpid}")
+            save_to_queue(candidate_id=cid,
+                          erpid=erpid if erpid else "N/A",
+                          overall_status=STATUS_PENDING,
+                          comments="ERP ID invalid or not found — pending",
+                          db_conn=db_conn)
+            push_data.append({"CandidateID": cid, "ERPID": erpid if erpid else "N/A",
+                              "status": STATUS_PENDING,
+                              "comments": "ERP ID invalid or not found — pending"})
+            continue
+
+        # Fetch pending candidate state from DB
         pending = fetch_pending_candidates(db_conn=db_conn)
         candidate_in_db = next((c for c in pending if c[0] == cid), None)
 
         if candidate_in_db:
-            # _, erpid_db, Text_payload, File_Payload, text_done, file_done, erp_done, overall_status, comments, _ = candidate_in_db
-            _, erpid_db, Text_payload, File_Payload, text_done, file_done, erp_done, overall_status, comments, _, mapping_file = candidate_in_db
-
-            logging.info(f"[Mapping] Candidate {cid} found in DB. Process starts from last state.")
+            _, erpid_db, batch_date, Text_payload, File_Payload, text_done, file_done, erp_done, overall_status, comments, _, mapping_file = candidate_in_db
+            logging.info(f"[Mapping] Candidate {cid} found in DB. Resuming last state.")
         else:
             Text_payload = File_Payload = None
             text_done = file_done = erp_done = 0
             overall_status = STATUS_PENDING
             comments = None
 
-        if not erpid:
-            logging.warning("[SKIP] ERPID missing — skipping candidate")
-            save_to_queue(candidate_id=cid, erpid="N/A", overall_status=STATUS_FAILED,
-                          comments="Missing ERPID — skipped", db_conn=db_conn)
-            push_data.append({"CandidateID": cid, "ERPID": "N/A", "status": STATUS_FAILED,
-                              "comments": "Missing ERPID — skipped"})
-            continue
-
         print_peoplestrong_snapshot(r)
 
-        # ------------------- Prepare Payloads -------------------
+        # ------------------- Phase 6b: Prepare Payloads -------------------
         try:
             if not Text_payload or not File_Payload:
                 with ThreadPoolExecutor(max_workers=2) as executor:
                     future_text = executor.submit(build_erp_payload, r)
                     future_docs = executor.submit(get_candidate_document_links, cid)
-
                     Text_payload = future_text.result()
                     File_Payload = future_docs.result()
-                    # File_Payload={}
 
                 save_to_queue(candidate_id=cid, erpid=erpid,
                               text_payload=json.dumps(Text_payload),
@@ -224,7 +193,7 @@ def PS_to_ERP_Push(db_conn=None):
                               erp_done=0,
                               overall_status=overall_status)
 
-            logging.info("[PHASE 6] Text payload and document links ready")
+            logging.info("[PHASE 6b] Text payload and document links ready")
         except Exception as e:
             logging.error(f"[ERROR] Failed to prepare payload/docs for {cid}: {e}")
             save_to_queue(candidate_id=cid, erpid=erpid,
@@ -235,7 +204,7 @@ def PS_to_ERP_Push(db_conn=None):
                               "comments": f"Payload/Document prep failed: {str(e)}"})
             continue
 
-        #------------------- Push to ERP -------------------
+        # ------------------- Phase 6c: Push to ERP -------------------
         try:
             if not erp_done:
                 status, resp = send_to_erp(erpid, payload_data=Text_payload, file_data=File_Payload)
@@ -247,8 +216,8 @@ def PS_to_ERP_Push(db_conn=None):
                               comments=bot_comment,
                               db_conn=db_conn)
 
-                logging.info(f"[PHASE 7] ERP Status={status} | ERPID={erpid}")
-                print(f"[PHASE 7] ERP Response: {resp}")
+                logging.info(f"[PHASE 6c] ERP Status={status} | ERPID={erpid}")
+                print(f"[PHASE 6c] ERP Response: {resp}")
             else:
                 logging.info(f"[SKIP] ERP already done for {cid}")
                 status = STATUS_SUCCESS
@@ -264,47 +233,40 @@ def PS_to_ERP_Push(db_conn=None):
 
         push_data.append({"CandidateID": cid, "ERPID": erpid, "status": status, "comments": bot_comment})
 
-     
-    # ================== ARCHIVE BATCH FILES ==================
-    all_completed = all(
-    item["status"] in (STATUS_SUCCESS, STATUS_FAILED)
-    for item in push_data
-)
-
+    # ------------------- Phase 7: Archive Batch Files -------------------
     if push_data:
-        if all_completed:
-            logging.info("[ARCHIVE] All candidates processed. Moving batch files to COMPLETED archive...")
-            move_mode = True
-        else:
-            logging.info("[ARCHIVE] Some candidates still pending. Copying files to archive (keeping originals)...")
-            move_mode = False
-
-        for f_name in source_file:
-            try:
-                safe_archive_file(
-                    sftp,
-                    f"{IMPORT_DIR}/{f_name}",
-                    ARCHIVE_DIR,
-                    move_file=move_mode
-                )
-                action = "Moved" if move_mode else "Copied"
-                logging.info("[ARCHIVE] %s: %s", action, f_name)
-
-            except Exception as e:
-                logging.error("[ARCHIVE ERROR] %s", str(e))
+        all_success = all(item["status"] == STATUS_SUCCESS for item in push_data)
+        archive_batch_files(sftp, source_file, move_file=all_success)
+        logging.info(f"[ARCHIVE] Batch files {'moved permanently' if all_success else 'kept temporarily for reprocessing'}")
     else:
         logging.warning("[ARCHIVE] No candidates processed. Skipping archive.")
 
-
-    # ------------------- Close SFTP -------------------
+    # ------------------- Phase 8: Close SFTP -------------------
     try:
         sftp.close()
         ssh.close()
     except Exception as e:
         logging.error("Failed to close SFTP/SSH connections: %s", str(e))
-    
+
+    # ------------------- Phase 9: Send Push Summary -------------------
+    if push_data:
+        all_success = all(item["status"] == STATUS_SUCCESS for item in push_data)
+        if all_success:
+            logging.info("[PHASE 9] All candidates synced successfully. Sending push summary email...")
+            send_push_summary_email(push_data)
+        else:
+            logging.info("[PHASE 9] Not all candidates synced successfully. Sending ERP error summary...")
+            send_erp_error_summary(push_data)
+
+    # ------------------- Phase 10: Batch Summary -------------------
+    total_candidates = len(push_data)
+    success_count = sum(1 for x in push_data if x["status"] == STATUS_SUCCESS)
+    pending_count = sum(1 for x in push_data if x["status"] == STATUS_PENDING)
+    failed_count = sum(1 for x in push_data if x["status"] == STATUS_FAILED)
+
+    logging.info("=" * 80)
+    logging.info(f"BATCH SUMMARY → Total: {total_candidates} | Success: {success_count} | Pending: {pending_count} | Failed: {failed_count}")
+    logging.info("=" * 80)
+    print(f"\nBATCH SUMMARY → Total: {total_candidates} | Success: {success_count} | Pending: {pending_count} | Failed: {failed_count}\n")
+
     logging.info("===== PROCESS COMPLETE =====")
-
-
-
-
