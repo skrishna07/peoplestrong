@@ -70,7 +70,7 @@ SMTP_SERVER =os.getenv("SMTP_SERVER")
 SMTP_PORT =os.getenv("SMTP_PORT")
 SENDER_EMAIL =os.getenv("SENDER_EMAIL")
 SENDER_PASS =os.getenv("SENDER_PASS")
-RECIPIENTS =os.getenv("RECIPIENTS") 
+RECIPIENTS =os.getenv("RECIPIENTS","").split(",")
 # ------------------------------
 # Logger setup
 # ------------------------------
