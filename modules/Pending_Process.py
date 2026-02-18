@@ -45,7 +45,7 @@ def Push_Pending(db_conn=None):
     pending_by_mapping = {}
     for row in pending_rows:
 
-        candidate_id, erpid, Text_payload, File_Payload, text_done, file_done, erp_done, overall_status, comments, source_file_json, mapping_file = row
+        candidate_id, erpid,batch_date, Text_payload, File_Payload, text_done, file_done, erp_done, overall_status, comments, source_file_json, mapping_file = row
 
 
 
@@ -75,7 +75,7 @@ def Push_Pending(db_conn=None):
         if not m:
             logging.warning(f"[PENDING][WARN] Invalid mapping filename format: {mapping_file}")
             continue
-        batch_date = datetime.strptime(m.group(1), "%d%m%Y").date()
+        # batch_date = datetime.strptime(m.group(1), "%d%m%Y").date()
 
         # ------------------- Load Source File List -------------------
         source_file_list = json.loads(candidates[0][9] if candidates[0][9] else "[]")  # FIXED: row[9] is source_file JSON
