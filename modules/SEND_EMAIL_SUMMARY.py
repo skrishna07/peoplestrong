@@ -18,8 +18,8 @@ def send_smtp_email(subject, html_body):
         msg = MIMEMultipart()
         msg['From'] = SENDER_EMAIL
         # msg['To'] = RECIPIENTS
-        # msg['To'] = ', '.join(RECIPIENTS) 
-        msg['To'] = 'sridhar.s@bradsol.com'
+        msg['To'] = ', '.join(RECIPIENTS) 
+        # msg['To'] = 'sridhar.s@bradsol.com'
         # msg['Subject'] = subject
         msg['Subject'] = Header(subject, 'utf-8') 
         msg.attach(MIMEText(html_body, 'html'))
