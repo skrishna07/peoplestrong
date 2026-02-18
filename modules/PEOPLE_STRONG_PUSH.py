@@ -11,7 +11,7 @@ from modules.Pending_Process import *
 from modules.Csv_File_Handler import *
 from api_handler.Ps_to_Erp_Requestor import send_to_erp
 from modules.Document_Base64_Generator import get_candidate_document_links
-from modules.SEND_EMAIL_SUMMARY import send_push_summary_email,send_mapping_alert_email
+from modules.SEND_EMAIL_SUMMARY import send_push_summary_email,send_mapping_alert_email,send_smtp_email
 from modules.Pending_Process import Push_Pending
 from modules.ERP_Builder import build_erp_payload
 
@@ -100,6 +100,72 @@ def PS_to_ERP_Push(db_conn=None):
     # ------------------- Build Master DataFrame -------------------
     master = build_master_dataframe(dfs)
     dump_df(master, "RPA_Master_File")
+
+
+    if master.empty:
+        logging.warning("[ALERT] Mapping present but no matching candidate data found.")
+
+        unmapped_ids = mapping_df[JOIN_KEY].tolist()
+
+        subject = f"PeopleStrong to  ERP Alert | No Matching Data | {datetime.now().strftime('%d-%m-%Y')}"
+
+        # Build ID rows
+        id_rows = "".join(
+            [f"<tr><td>{cid}</td></tr>" for cid in unmapped_ids]
+        )
+
+        html_body = f"""
+        <html>
+        <body style="font-family:Calibri; font-size:14px;">
+            <p>Dear Team,</p>
+
+            <p>
+            The Mapping file <b>{mapping_file}</b> contains 
+            <b>{len(unmapped_ids)}</b> candidate ID(s), 
+            but no matching records were found in <b>CandidateData</b>.
+            </p>
+
+            <h3 style="color:#c00000;">Candidate Data Not Found</h3>
+
+
+            <table border="1" cellpadding="6" cellspacing="0"
+                style="border-collapse:collapse; width:40%; text-align:center;">
+                <tr style="background-color:#f4cccc;">
+                    <th>Candidate ID</th>
+                </tr>
+                {id_rows}
+            </table>
+
+            <p>
+            <b>Reason:</b> CandidateData file was empty or did not contain matching records.
+            </p>
+
+            <p>
+            Batch files have been archived.
+            </p>
+
+            <p>Regards,<br><b>RPA BOT</b></p>
+        </body>
+        </html>
+        """
+
+        # Send directly
+        send_smtp_email(subject, html_body)
+
+        # -------- Archive --------
+        for f_name in source_file:
+            safe_archive_file(
+                sftp,
+                f"{IMPORT_DIR}/{f_name}",
+                ARCHIVE_DIR,
+                move_file=True
+            )
+
+        sftp.close()
+        ssh.close()
+        logging.info("===== PROCESS COMPLETE =====")
+        return
+
 
     push_data = []
 
