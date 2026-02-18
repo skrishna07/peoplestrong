@@ -6,6 +6,8 @@ import logging
 
 DB_FILE = "Production_erp_sync_queue.db"
 FILE_DIR = "pending_files"
+CSV_FILE = os.path.join(FILE_DIR, "pending_sync.csv")
+
 os.makedirs(FILE_DIR, exist_ok=True)
 
 
@@ -113,6 +115,10 @@ def save_to_queue(candidate_id, erpid, text_payload=None, file_path=None, db_con
               overall_status, erp_status, erp_response,
               error_message, failed_phase, comments))
         db_conn.commit()
+        update_csv(candidate_id, erpid, batch_date, mapping_file, source_file,
+                   text_payload, file_path, text_done, file_done, erp_done,
+                   overall_status, erp_status, erp_response, error_message,
+                   failed_phase, comments)
         if own_conn:
             db_conn.close()
         logging.info(f"[DB] Candidate {candidate_id} saved/updated in queue successfully.")
@@ -155,7 +161,7 @@ def fetch_pending_candidates(db_conn=None):
 
         c = db_conn.cursor()
         c.execute("""
-            SELECT candidate_id, erpid, text_payload, file_path, text_done, file_done, erp_done,
+            SELECT candidate_id, erpid,batch_date, text_payload, file_path, text_done, file_done, erp_done,
                    overall_status, comments, source_file, mapping_file
             FROM pending_sync
             WHERE erp_done=0
@@ -199,3 +205,87 @@ def update_pull_status(candidate_id, status, error_msg=None, db_conn=None):
         logging.info(f"[PULL] Candidate {candidate_id} pull status updated: {status}")
     except Exception as e:
         logging.error(f"[PULL] Failed to update pull status for {candidate_id}: {e}")
+
+
+
+
+
+import csv
+
+CSV_FILE = os.path.join(FILE_DIR, "pending_sync.csv")
+
+def update_csv(candidate_id, erpid, batch_date=None, mapping_file=None, source_file=None,
+               text_payload=None, file_path=None, text_done=None, file_done=None, erp_done=None,
+               overall_status=None, erp_status=None, erp_response=None, error_message=None,
+               failed_phase=None, comments=None):
+    """Append or update candidate info in CSV."""
+    text_payload_str = json.dumps(text_payload) if isinstance(text_payload, dict) else text_payload
+    fieldnames = ['candidate_id', 'erpid', 'batch_date', 'mapping_file', 'source_file',
+                  'text_payload', 'file_path', 'text_done', 'file_done', 'erp_done',
+                  'overall_status', 'erp_status', 'erp_response', 'error_message',
+                  'failed_phase', 'comments']
+
+    rows = []
+    if os.path.exists(CSV_FILE):
+        with open(CSV_FILE, newline='', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+
+    updated = False
+    for row in rows:
+        if row['candidate_id'] == candidate_id:
+            row.update({
+                'erpid': erpid, 'batch_date': batch_date, 'mapping_file': mapping_file,
+                'source_file': source_file, 'text_payload': text_payload_str,
+                'file_path': file_path, 'text_done': text_done, 'file_done': file_done,
+                'erp_done': erp_done, 'overall_status': overall_status, 'erp_status': erp_status,
+                'erp_response': erp_response, 'error_message': error_message,
+                'failed_phase': failed_phase, 'comments': comments
+            })
+            updated = True
+            break
+
+    if not updated:
+        rows.append({
+            'candidate_id': candidate_id, 'erpid': erpid, 'batch_date': batch_date, 'mapping_file': mapping_file,
+            'source_file': source_file, 'text_payload': text_payload_str,
+            'file_path': file_path, 'text_done': text_done, 'file_done': file_done,
+            'erp_done': erp_done, 'overall_status': overall_status, 'erp_status': erp_status,
+            'erp_response': erp_response, 'error_message': error_message,
+            'failed_phase': failed_phase, 'comments': comments
+        })
+
+    with open(CSV_FILE, 'w', newline='', encoding='utf-8') as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+
+
+
+
+
+def fetch_pull_pending_candidates(db_conn=None):
+    """Fetch all candidates that have pull_status PENDING or FAILED."""
+    try:
+        own_conn = False
+        if db_conn is None:
+            db_conn = sqlite3.connect(DB_FILE)
+            own_conn = True
+
+        c = db_conn.cursor()
+        c.execute("""
+            SELECT candidate_id, erpid, batch_date, text_payload, file_path, text_done, file_done, erp_done,
+                   overall_status, comments, source_file, mapping_file, pull_status, pull_Error
+            FROM pending_sync
+            WHERE pull_status IN ('PENDING', 'FAILED')
+            ORDER BY created_at ASC
+        """)
+        rows = c.fetchall()
+        if own_conn:
+            db_conn.close()
+        return rows
+    except Exception as e:
+        logging.error(f"[DB] Failed to fetch pending candidates by pull_status: {e}")
+        return []
