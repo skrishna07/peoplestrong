@@ -1,6 +1,7 @@
-from modules.Helpers import log_event  
+from modules.Helpers import *
 from libraries import *
 from email.header import Header
+
 
 # =====================================================
 # Core SMTP Engine
@@ -16,7 +17,9 @@ def send_smtp_email(subject, html_body):
         # Create Message Container
         msg = MIMEMultipart()
         msg['From'] = SENDER_EMAIL
-        msg['To'] = RECIPIENTS
+        # msg['To'] = RECIPIENTS
+        # msg['To'] = ', '.join(RECIPIENTS) 
+        msg['To'] = 'sridhar.s@bradsol.com'
         # msg['Subject'] = subject
         msg['Subject'] = Header(subject, 'utf-8') 
         msg.attach(MIMEText(html_body, 'html'))
@@ -171,7 +174,7 @@ def send_pull_summary_email(pull_data, subject=None):
     aggregated = defaultdict(lambda: {"files": [], "status": "SUCCESS", "failed_files": []})
 
     for entry in pull_data:
-        emp_id = entry["Candidate ID"]
+        emp_id = entry["CandidateID"]
         file_name = entry["Data Extracted (files)"]
         aggregated[emp_id]["files"].append(file_name)
 
@@ -241,3 +244,86 @@ def send_pull_summary_email(pull_data, subject=None):
             [f"{r['Candidate ID']} | {r['Data Extracted (files)']} | {r['Pull Status']} | {r['BOT Comments']}" for r in html_data]
         )
         send_smtp_email(subject, fallback_body)
+
+
+
+
+def send_erp_error_summary(push_data):
+    """
+    Sends an email summary of all candidates that failed ERP push.
+    
+    push_data: list of dicts with keys ["CandidateID", "ERPID", "status", "comments", "error_message"]
+    """
+    if not push_data:
+        logging.info("[ERP ERROR EMAIL] No push data available. Skipping email.")
+        return
+
+    failed_candidates = [p for p in push_data if p.get("status") == STATUS_FAILED]
+    if not failed_candidates:
+        logging.info("[ERP ERROR EMAIL] All candidates synced successfully. No error summary email sent.")
+        return
+
+    # Build HTML table
+    rows = ""
+    for f in failed_candidates:
+        error_text = f.get("error_message", f.get("comments", ""))
+        rows += f"<tr><td>{f['CandidateID']}</td><td>{f['ERPID']}</td><td>{error_text}</td></tr>"
+
+    html_body = f"""
+    <html>
+    <body style="font-family:Calibri; font-size:14px;">
+        <p>Dear Team,</p>
+        <p>The following candidate(s) failed to sync with ERP:</p>
+        <table border="1" cellpadding="6" cellspacing="0"
+               style="border-collapse:collapse; width:80%; text-align:left;">
+            <tr style="background-color:#f4cccc;">
+                <th>Candidate ID</th>
+                <th>ERPID</th>
+                <th>Error Summary</th>
+            </tr>
+            {rows}
+        </table>
+        <p>Please review and correct the data.</p>
+        <p>Regards,<br><b>RPA BOT</b></p>
+    </body>
+    </html>
+    """
+
+    send_smtp_email(
+        subject=f"ERP Push Error Summary | {datetime.now().strftime('%d-%m-%Y')}",
+        html_body=html_body
+    )
+    logging.info("[ERP ERROR EMAIL] Sent ERP push error summary email.")
+
+
+
+def send_no_data_alert(mapping_file, candidate_ids):
+    subject = f"PeopleStrong to ERP Alert | No Matching Data | {datetime.now().strftime('%d-%m-%Y')}"
+    id_rows = "".join([f"<tr><td>{cid}</td></tr>" for cid in candidate_ids])
+
+    html_body = f"""
+    <html>
+    <body style="font-family:Calibri; font-size:14px;">
+        <p>Dear Team,</p>
+        <p>
+        The Mapping file <b>{mapping_file}</b> contains 
+        <b>{len(candidate_ids)}</b> candidate ID(s), 
+        but no matching records were found in <b>CandidateData</b>.
+        </p>
+        <h3 style="color:#c00000;">Candidate Data Not Found</h3>
+        <table border="1" cellpadding="6" cellspacing="0"
+            style="border-collapse:collapse; width:40%; text-align:center;">
+            <tr style="background-color:#f4cccc;">
+                <th>Candidate ID</th>
+            </tr>
+            {id_rows}
+        </table>
+        <p>
+        <b>Reason:</b> CandidateData file was empty or did not contain matching records.
+        </p>
+        <p>Batch files have been archived.</p>
+        <p>Regards,<br><b>RPA BOT</b></p>
+    </body>
+    </html>
+    """
+    send_smtp_email(subject, html_body)
