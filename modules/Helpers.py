@@ -37,35 +37,21 @@ def get_sftp_connection():
     ssh.connect(os.environ["SFTP_HOST"], port=2222, username=os.environ["SFTP_USER"], password=os.environ["SFTP_PASS"])
     return ssh, ssh.open_sftp()
 
-# def safe_archive_file(sftp, source_path, archive_dir):
-#     filename = os.path.basename(source_path)
-#     target_path = f"{archive_dir}/{filename}"
-#     print("###############","Data files will be Archived Here",target_path)
-    
-#     try:
-#         sftp.stat(archive_dir)
-#     except IOError:
-#         sftp.mkdir(archive_dir)
-#     try:
-#         sftp.remove(target_path)
-#     except IOError:
-#         pass
-#     sftp.rename(source_path, target_path)
-
 
 
 def safe_archive_file(sftp, source_path, archive_dir, move_file=True):
     """
-    Move or copy a file on SFTP to archive.
-    
-    Parameters:
-        sftp        : paramiko SFTP client
-        source_path : str, full path of the source file on SFTP
-        archive_dir : str, SFTP archive folder path
-        move_file   : bool, True → move file, False → copy file
+    Archive a file on SFTP.
+
+    move_file=True  → Permanent archive (MOVE)
+    move_file=False → Temporary archive (COPY)
     """
+
     filename = os.path.basename(source_path)
     target_path = f"{archive_dir}/{filename}"
+
+    archive_mode = "PERMANENT (MOVE)" if move_file else "TEMPORARY (COPY)"
+    logging.info(f"[ARCHIVE MODE] {archive_mode} | File: {filename}")
 
     # Ensure archive directory exists
     try:
@@ -77,22 +63,20 @@ def safe_archive_file(sftp, source_path, archive_dir, move_file=True):
     # Remove existing file in archive if present
     try:
         sftp.remove(target_path)
-        logging.info(f"[ARCHIVE] Removed existing file in archive: {target_path}")
+        logging.info(f"[ARCHIVE] Removed old archive file: {filename}")
     except IOError:
-        pass  # File did not exist, that's fine
+        pass
 
     try:
         if move_file:
-            # MOVE (rename)
             sftp.rename(source_path, target_path)
-            logging.info(f"[ARCHIVE] Moved file: {source_path} → {target_path}")
+            logging.info(f"[ARCHIVE] MOVE completed → {filename}")
         else:
-            # COPY (read + write)
             with sftp.open(source_path, "rb") as src, sftp.open(target_path, "wb") as dst:
                 dst.write(src.read())
-            logging.info(f"[ARCHIVE] Copied file: {source_path} → {target_path}")
+            logging.info(f"[ARCHIVE] COPY completed → {filename}")
     except Exception as e:
-        logging.error(f"[ARCHIVE ERROR] Failed to archive file {source_path}: {e}")
+        logging.error(f"[ARCHIVE ERROR] {filename}: {e}")
 
 
 def is_not_duplicate(sftp, target_dir, emp_id, doc_code):
