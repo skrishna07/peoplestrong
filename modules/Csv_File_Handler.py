@@ -38,64 +38,6 @@ def robust_pipe_reader(file_obj):
     return pd.DataFrame(data[1:], columns=data[0], dtype=str)
 
 
-# def load_csvs(sftp):
-#     prefixes = [
-#         "CandidateData",
-#         "CandidateContact",
-#         "CandidateEducation",
-#         "CandidateEmergencyContact",
-#         "CandidateIDDetails",
-#         "CandidateSalaryData",
-#         "Mapping"
-#     ]
-
-#     files = sftp.listdir(IMPORT_DIR)
-#     dfs = {}
-#     source_files = []
-
-#     logging.info("[PHASE 2] Loading PeopleStrong CSVs")
-
-#     batch_date = None
-#     mapping_file = None
-
-#     for p in prefixes:
-#         f = latest_file(files, p)
-#         if not f:
-#             raise RuntimeError(f"Missing mandatory CSV: {p}")
-
-#         source_files.append(f)  # collect all loaded files
-
-#         if p == "Mapping":
-#             mapping_file = f
-#             # extract batch date from Mapping filename: Mapping_05112025_000124.csv
-#             m = re.match(r"Mapping_(\d{8})_\d{6}\.csv", f)
-#             if m:
-#                 batch_date = datetime.strptime(m.group(1), "%d%m%Y").date()
-
-#         sftp_path = f"{IMPORT_DIR}/{f}"
-#         logging.info(f"[PHASE 2] Reading file: {f} → {sftp_path}")
-
-#         if p == "CandidateContact":
-#             with sftp.open(sftp_path, "rb") as fh:
-#                 df = robust_pipe_reader(fh)
-#         else:
-#             with sftp.open(sftp_path, "rb") as fh:
-#                 df = pd.read_csv(io.BytesIO(fh.read()), sep="|", dtype=str)
-
-#         df.columns = df.columns.str.strip()
-
-#         if p == "Mapping":
-#             df = df.rename(columns={"PeopleStrongID": JOIN_KEY})
-
-#         if JOIN_KEY not in df.columns:
-#             raise RuntimeError(f"{p} missing {JOIN_KEY}")
-
-#         dfs[p] = df
-#         logging.info(f"[PHASE 2] {p} rows loaded: {len(df)}")
-
-#     logging.info("[PHASE 2] All CSV files loaded successfully")
-
-#     return dfs, batch_date, mapping_file, source_files
 
 
 
