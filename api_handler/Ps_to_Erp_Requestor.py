@@ -70,3 +70,51 @@ def send_to_erp(erpid, payload_data, file_data=None):
         logging.error(f"❌ Connection Error: {str(e)}")
         return "FAILED", str(e)
 
+
+
+
+
+def is_erp_id_valid(employee_id: str) -> bool:
+    """
+    Returns True if ERP ID exists and is valid, False otherwise.
+    
+    Uses the variables defined:
+      ERP_API_URL / ERP_AUTH_TOKEN
+    """
+    if not employee_id:
+        logging.warning("[ERP CHECK] No employee_id provided")
+        return False
+
+    url = f"https://erp.innovationuae.com//{ERP_ENDPOINT}?employee_ids={employee_id}&="
+    headers = {
+        "auth": AUTH_TOKEN,
+        "Accept": "application/json",
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=30)
+        data = response.json()
+
+        # ID found if status=OK and employee_id in data
+        if response.status_code == 200 and data.get("status") == "OK":
+            if str(employee_id) in data.get("data", {}):
+                logging.info(f"[ERP CHECK] ERP ID {employee_id} is VALID")
+                return True
+            else:
+                logging.info(f"[ERP CHECK] ERP ID {employee_id} NOT FOUND in ERP data")
+                return False
+
+        # 400 or status=ERROR → invalid ID
+        if response.status_code == 400 or data.get("status") == "ERROR":
+            logging.info(f"[ERP CHECK] ERP ID {employee_id} NOT VALID (ERP returned error)")
+            return False
+
+        # Any other HTTP errors
+        response.raise_for_status()
+
+    except requests.RequestException as e:
+        logging.error(f"[ERP CHECK ERROR] {employee_id}: {e}")
+        return False
+
+
+
