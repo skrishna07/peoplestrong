@@ -95,9 +95,8 @@ def PS_to_ERP_Push(db_conn=None):
         return
 
     mapping_df[JOIN_KEY] = mapping_df[JOIN_KEY].astype(str).str.strip()
-    mapping_df["ERPID"] = mapping_df.get("ERPID", "").astype(str).str.strip()
 
-    missing_ids = mapping_df[mapping_df[JOIN_KEY].isna() | mapping_df["ERPID"].isna()][JOIN_KEY].tolist()
+    missing_ids = mapping_df[mapping_df[JOIN_KEY].isna()][JOIN_KEY].tolist()
     if missing_ids:
         logging.warning(f"[ALERT] {len(missing_ids)} candidate IDs missing mapping fields.")
         send_mapping_alert_email(mapping_file_name=mapping_file, missing_ids=missing_ids)
@@ -115,11 +114,7 @@ def PS_to_ERP_Push(db_conn=None):
             logging.warning(f"[ALERT] {len(invalid_ps_ids)} PeopleStrong IDs do not start with 'PH'. Please verify these IDs:")
             print(invalid_ps_ids[[JOIN_KEY, "ERPID"]])
 
-        # Ensure ERPID exists for every row
-        if "ERPID" not in master.columns:
-            master["ERPID"] = "N/A"
-        else:
-            master["ERPID"] = master["ERPID"].fillna("N/A").astype(str).str.strip()
+        
 
         logging.info(f"[SAFETY CHECK] ERP IDs verified for {len(master)} candidates")
 
@@ -140,7 +135,7 @@ def PS_to_ERP_Push(db_conn=None):
     push_data = []
     for _, r in master.iterrows():
         cid = r[JOIN_KEY]
-        erpid = safe(r.get("ERPID"))
+        erpid = safe(r.get(JOIN_KEY))
 
         logging.info("-" * 60)
         logging.info(f"[PHASE 6] Processing Candidate: {cid}")
@@ -154,7 +149,7 @@ def PS_to_ERP_Push(db_conn=None):
                           comments="ERP ID invalid or not found — pending",
                           db_conn=db_conn)
             push_data.append({"CandidateID": cid, "ERPID": erpid if erpid else "N/A",
-                              "status": STATUS_PENDING,
+                              "status": STATUS_FAILED,
                               "comments": "ERP ID invalid or not found — pending"})
             continue
 

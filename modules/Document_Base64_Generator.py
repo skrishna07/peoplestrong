@@ -11,10 +11,21 @@ def normalize_name(name: str) -> str:
     Normalize filenames and aliases for matching:
     - lowercase
     - remove underscores, hyphens, spaces
+    - remove en-dash and other common special characters
     """
-    norm = name.replace("-", "").replace("_", "").replace(" ", "").lower()
+    # Replace common separators with nothing
+    norm = (
+        name.replace("-", "")
+            .replace("_", "")
+            .replace(" ", "")
+            .replace("–", "")   # en-dash
+            .replace("—", "")   # em-dash
+            .replace(".", "")   # remove periods
+            .lower()
+    )
     logging.debug(f"Normalized '{name}' -> '{norm}'")
     return norm
+
 
 
 

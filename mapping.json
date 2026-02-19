@@ -1,249 +1,31 @@
 {
   "file_mapping_rules": {
- 
-    "EmiratesID-copy": [
-      "Emirates_ID_copy",
-      "New_Emirates_ID_copy",
-      "Candidate_Emirates_Copy",
-      "eid_copy"
-    ],
- 
-    "Person-photo": [
-      "Photo",
-      "Photograph",
-      "Candidate_Photo"
-    ],
- 
-    "Person-cv": [
-      "Pre_Joining_Resume",
-      "Resume",
-      "CV"
-    ],
- 
+
     "Passport-scan": [
-      "Passport_Copy"
+      "Passport_Copy","Pre Joining - Passport Copy"
     ],
- 
-    "EmployeeContract-offerletter": [
-      "Offer_letter",
-      "Appointment_Letter_Contract"
-    ],
- 
-    "EmployeeContract-codeofconductcopy": [
-      "Client_COC",
-      "NDA",
-      "Conflict_of_Interest"
-    ],
- 
-    "EmployeeContract-joiningreportscan": [
-      "Joining_Report",
-      "DOJ_Report"
-    ],
- 
-    "EmployeeContract-personalinfosheet": [
-      "Personal_Info_Sheet"
-    ],
- 
-    "EntryVisa-visacopy": [
-      "Joining_E_Visa_Copy",
-      "Visa_Copy",
-      "residence_visa"
-    ],
- 
-    "LaborContract-laborcardcopy": [
-      "Joining_LC","Joining_LC_AUH"
-    ],
- 
- 
- 
-    "EmployeeContract-molofferletter": [
-      "Joining_MOL_Staff",
-      "MOL",
-      "MOL_Signed_and_upload"
-    ],
- 
-    "EmployeeContract-cancellationcopy": [
-      "Imigration_cancellation",
-      "Labor_cancellation"
-    ],
- 
-    "EmployeeContract-joiningundertaking": [
-      "DOJ_Confirmation_by_Staff",
-      "Bank_Undertaking",
-      "Passport_Undertaking",
-      "PNG_undertaking",
-      "EID_undertaking"
-    ],
- 
-    "EmployeeContract-backgroundcheck": [
-      "AECB_certificate",
-      "Pre_Joining_Reference",
-      "Reference_Check"
-    ],
- 
+
     "EmpOLProcess-empexperienceletter": [
-      "Experience_Letter"
+      "Experience_Letter","Pre Joining - Experience Letter"
     ],
- 
-    "EmpOLProcess-clientauthorizationcopy": [
-      "Client_Authorization",
-      "Client_Authorization_Copy"
+
+    "Person-cv": [
+      "Pre_Joining_Resume","Pre Joining – Resume"
     ],
- 
-    "EmpOLProcess-referencecheckdocument": [
-      "Reference_Check",
-      "Pre_Joining_Reference"
+
+    "Person-photo": [
+      "Photo","Pre Joining - Photo"
     ],
- 
-    "EmpOLProcess-referencecheckdocument2": [
-      "Reference_Check_2"
+
+   
+      "EmiratesIDProcess-eidregform": [
+      "Pre Joining - Emirates ID copy",
+      "Post Joining - Emirates ID copy",
+      "Post/Pre Joining - Emirates ID copy"
     ],
- 
-    "EmpOLProcess-cidclearence": [
-      "CID_Clearance"
-    ],
- 
-    "EmpUAEResidence-dewabillcopy": [
-      "DEWA_Bill",
-      "Utility_Bill"
-    ],
- 
-    "EmpUAEResidence-ejaricert": [
-      "Ejari_Certificate"
-    ],
- 
-    "EmpCustomization2-clawbackundertaking": [
-      "Clawback_Undertaking"
-    ],
- 
-    "EmpCustomization2-trainingacknowledgement": [
-      "Training_Acknowledgement"
-    ],
- 
-    "IAorTravel-iaemployeeundertaking": [
-      "IA_Undertaking"
-    ],
- 
-    "IAorTravel-iainternalapprovalcopy": [
-      "IA_Internal_Approval"
-    ],
- 
-    "IAorTravel-internalamendcashreceipt": [
-      "IA_Cash_Receipt"
-    ],
- 
-    "IAorTravel-iadocuments": [
-      "Joining_Status_change_IA_document"
-    ],
- 
-    "ILOEInsurance-copy": [
-      "ILOE_Insurance_Copy",
-      "Insurance_MAF_form"
-    ],
- 
-    "LaborContractProcess-lctypedlaborcontractcopy": [
-      "Joining_AUH_-LC_Staff ","Joining_LC_Staff"
-    ],
- 
-    "LaborContractProcess-signedlabourcontract": [
-      "Signed_Labour_Contract"
-    ],
- 
-    "LaborContractProcess-lcretypingapproval": [
-      "LC_Retyping_Approval"
-    ],
- 
-    "MOLOL-typedmolofferlcopy": [
-      "MOL_Typed_Offer_Letter"
-    ],
- 
-    "MOLOL-signedmolofferletter": [
-      "MOL_Signed_Offer_Letter"
-    ],
- 
-    "MOLOL-mololclientapproval": [
-      "MOL_Client_Approval"
-    ],
- 
-    "MedicalCheck-medicalapplicationcopy": [
-      "Medical_Application"
-    ],
- 
-    "MedicalCheck-medicalstampedapplicationcopy": [
-      "Medical_Stamped_Application"
-    ],
- 
-    "MedicalCheck-medicalcrtscan": [
-      "Medical_Certificate"
-    ],
- 
-    "MedicalCheck-medicalreceipt": [
-      "Medical_Receipt"
-    ],
- 
-    "PreJoinVisa-entrystampvisitvisacopy": [
-      "Joining_Entry_Stamp"
-    ],
- 
+
     "Qualification-certfile": [
-      "Degree_Attested_Yes_upload_document_-_If_No_Click_on_NA",
-      "Education_Certificate"
-    ],
- 
-    "ResidenceVisaProcess-urgentcostapprovalcopy": [
-      "Urgent_Cost_Approval"
-    ],
- 
-    "ResidenceVisaProcess-visastampreceipt": [
-      "Visa_Stamp_Receipt"
-    ],
-    
-  "SponsorVisa-copy": [
-    "Sponsored_visa"
-  ],
-
-  "SponsorPassport-scan": [
-    "Sponsored_Passport"
-  ],
-
-  "EmployeeContract-sponsornocscan": [
-    "NOC_from_sponsored",
-    "Pre_Joining_NOC_from_the_Company"
-  ],
-
-  "EmiratesIDProcess-eidretyperegform": [
-    "Joining_-Stamped_Emirates_Application"
-  ],
-
-  "EmiratesIDProcess-emiratesidoldcopy": [
-    "Candidate_Visa_Copy_and_Emirates_Copy"
-  ],
-
-  "EmiratesIDProcess-eidundertaking": [
-    "Pre_Joining_EID_undertaking"
-  ],
-
-  "EmiratesIDProcess-eidregform": [
-    "Joining_Type_Emirates_ID_Application"
-  ],
-
-  "MedicalCheck-medicalcompletedate": [
-    "Joining_-Medical_Completion_Date"
-  ],
-
-  "PreJoinVisa-cancellationpaperscan": [
-    "Joining_Imigration_cancellation"
-  ],
-
-  "ResidenceVisa-copy": [
-    "Visa_Copy"
-  ]
+      "Education_Certificate"  ,"Qualification Certificate"
+    ]
+  }
 }
-
-  
-}
- 
- 
- 
- 
- 

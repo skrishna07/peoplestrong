@@ -68,6 +68,7 @@ def load_csvs(sftp):
         raise RuntimeError("Invalid Mapping filename format in Mapping CSV")
 
     batch_date_str = m.group(1)  # e.g., '14022026'
+    # batch_date_str="18022026"
     batch_date = datetime.strptime(batch_date_str, "%d%m%Y").date()
     logging.info(f"[PHASE 2] Selected batch date: {batch_date_str}")
 
@@ -96,7 +97,10 @@ def load_csvs(sftp):
         df.columns = df.columns.str.strip()
 
         if p == "Mapping":
-            df = df.rename(columns={"PeopleStrongID": JOIN_KEY})
+            if "ERPID" in df.columns:
+                df = df.rename(columns={"ERPID": JOIN_KEY})
+            else:
+                raise RuntimeError(f"'ERPID' column missing in Mapping file: {f}")
 
         if JOIN_KEY not in df.columns:
             raise RuntimeError(f"{p} missing {JOIN_KEY}")
@@ -134,7 +138,7 @@ def build_master_dataframe(dfs):
     if mapping_df is None or mapping_df.empty:
         raise RuntimeError("Mapping CSV is missing or empty!")
 
-    mapping_df = mapping_df.rename(columns={"PeopleStrongID": JOIN_KEY})
+    mapping_df = mapping_df.rename(columns={"ERPID": JOIN_KEY})
     candidate_ids = mapping_df[JOIN_KEY].astype(str).str.strip().tolist()
     logging.info(f"[PHASE 3] Mapping loaded: {len(mapping_df)} candidates")
     print(f"[INFO] Today we got {len(mapping_df)} candidates in Mapping CSV")
@@ -145,6 +149,7 @@ def build_master_dataframe(dfs):
             print(f"[INFO] No records found for {name}")
             return pd.DataFrame(columns=[JOIN_KEY])
         df[JOIN_KEY] = df[JOIN_KEY].astype(str).str.strip()
+        
         filtered = df[df[JOIN_KEY].isin(candidate_ids)].copy()
         print(f"[INFO] {len(filtered)} {name} records match the Mapping candidates")
         return filtered

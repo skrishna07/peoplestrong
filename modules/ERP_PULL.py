@@ -171,7 +171,7 @@ erp_to_ps_required = {
     "ILOEInsurance-copy": "Joining–Insurance_Card",
     "LaborContract-laborcardcopy": "Joining–Labour_Card",
     "MOLOL-typedmolofferlcopy": "Joining–MOL_Document",
-    "MOLOL-signedmolofferletter": "Post_Joining–Typed_Emirates_Copy",
+    "EmiratesID-copy": "Post_Joining–Typed_Emirates_Copy",
     "ResidenceVisaProcess-visastampreceipt": "Post_Joining–Stamped_Visa"
 }
 
@@ -211,16 +211,16 @@ def ERP_to_PS_Pull(db_conn=None):
         with sftp.open(f"{ARCHIVE_DIR}/{latest_map}", "rb") as f:
             df = pd.read_csv(io.BytesIO(f.read()), sep='|', dtype=str)
 
-            if 'ERPID' in df.columns and 'PeopleStrongID' in df.columns:
-                if df['ERPID'].str.startswith('PH').any():
-                    df = df.rename(columns={'ERPID': 'PeopleStrongID', 'PeopleStrongID': 'ERPID'})
-                    logging.info("[PHASE 3] Columns swapped to match ERPID|PeopleStrongID format")
-            else:
+            # Ensure required headers exist
+            if 'ERPID' not in df.columns or 'PeopleStrongID' not in df.columns:
                 logging.error("[PHASE 3] Mapping file missing required headers. Exiting process.")
                 return
 
-            # Keep only valid PeopleStrong IDs
-            df = df[df['PeopleStrongID'].str.startswith('PH')]
+            # Keep only valid ERP IDs (PH…)
+            df = df[df['ERPID'].str.startswith('PH')]
+            logging.info("[PHASE 3] Mapping file loaded correctly with ERP IDs and PeopleStrong IDs")
+
+
 
         # ------------------- Phase 4: Pending ERP IDs -------------------
         pending_rows = fetch_pull_pending_candidates(db_conn)
@@ -253,6 +253,7 @@ def ERP_to_PS_Pull(db_conn=None):
         for emp_id in targets:
             logging.info("-" * 60)
             logging.info(f"[PHASE 5] Processing ERP ID: {emp_id}")
+
             candidate_meta = []
 
             # Map ERP ID to candidate_id
@@ -272,10 +273,10 @@ def ERP_to_PS_Pull(db_conn=None):
             try:
                 if not is_erp_id_valid(emp_id):
                     logging.warning(f"[SKIP] ERP ID {emp_id} not generated. Marking as PENDING.")
-                    update_pull_status(candidate_id, "PENDING", "ERP ID not yet generated", db_conn=db_conn)
+                    update_pull_status(emp_id, "PENDING", "ERP ID not yet generated", db_conn=db_conn)
                     stats["pending"] += 1
                     pull_data.append({
-                        "CandidateID": candidate_id,
+                        "CandidateID": emp_id,
                         "Pull Status": "PENDING",
                         "BOT Comments": "ERP ID not yet generated",
                         "Data Extracted (files)": ""
@@ -289,10 +290,10 @@ def ERP_to_PS_Pull(db_conn=None):
 
                 if res.status_code != 200:
                     logging.error(f"[ERROR] API call failed for {emp_id}: {res.status_code}")
-                    update_pull_status(candidate_id, "FAILED", f"API call failed: {res.status_code}", db_conn=db_conn)
+                    update_pull_status(emp_id, "FAILED", f"API call failed: {res.status_code}", db_conn=db_conn)
                     stats["failed"] += 1
                     pull_data.append({
-                        "CandidateID": candidate_id,
+                        "CandidateID": emp_id,
                         "Pull Status": "FAILED",
                         "BOT Comments": f"API call failed: {res.status_code}",
                         "Data Extracted (files)": ""
@@ -302,10 +303,10 @@ def ERP_to_PS_Pull(db_conn=None):
                 files = res.json().get("data", {}).get(str(emp_id), {}).get("files", {})
                 if not files:
                     logging.info(f"[SKIP] No files found for ERP ID {emp_id}")
-                    update_pull_status(candidate_id, "SKIPPED", "No files found", db_conn=db_conn)
+                    update_pull_status(emp_id, "SKIPPED", "No files found", db_conn=db_conn)
                     stats["skipped"] += 1
                     pull_data.append({
-                        "CandidateID": candidate_id,
+                        "CandidateID": emp_id,
                         "Pull Status": "SKIPPED",
                         "BOT Comments": "No files found",
                         "Data Extracted (files)": ""
@@ -334,17 +335,17 @@ def ERP_to_PS_Pull(db_conn=None):
                             out_f.write(doc_res.content)
                     except Exception as e:
                         logging.error(f"[ERROR] File download/validation failed for {emp_id}: {e}")
-                        update_pull_status(candidate_id, "FAILED", str(e), db_conn=db_conn)
+                        update_pull_status(emp_id, "FAILED", str(e), db_conn=db_conn)
                         stats["failed"] += 1
                         pull_data.append({
-                            "CandidateID": candidate_id,
+                            "CandidateID": emp_id,
                             "Pull Status": "FAILED",
                             "BOT Comments": str(e),
                             "Data Extracted (files)": f_name
                         })
                         continue
 
-                    candidate_meta.append(f"{candidate_id}|{DOC_DIR}|{final_filename}|{doc_type}")
+                    candidate_meta.append(f"{emp_id}|{DOC_DIR}|{final_filename}|{doc_type}")
 
                 # ------------------- Stage 5c: Write metadata CSV -------------------
                 if candidate_meta:
@@ -353,10 +354,10 @@ def ERP_to_PS_Pull(db_conn=None):
                         m_f.write("EmployeeCode|Path|Filename|DocCode\n")
                         m_f.write("\n".join(candidate_meta))
 
-                update_pull_status(candidate_id, "SUCCESS", None, db_conn=db_conn)
+                update_pull_status(emp_id, "SUCCESS", None, db_conn=db_conn)
                 stats["success"] += 1
                 pull_data.append({
-                    "CandidateID": candidate_id,
+                    "CandidateID": emp_id,
                     "Pull Status": "SUCCESS",
                     "BOT Comments": "Files synced successfully",
                     "Data Extracted (files)": ", ".join([f.split('|')[2] for f in candidate_meta])
@@ -364,10 +365,10 @@ def ERP_to_PS_Pull(db_conn=None):
 
             except Exception as e:
                 logging.error(f"[ERROR] Unexpected error processing ERP ID {emp_id}: {e}")
-                update_pull_status(candidate_id, "FAILED", str(e), db_conn=db_conn)
+                update_pull_status(emp_id, "FAILED", str(e), db_conn=db_conn)
                 stats["failed"] += 1
                 pull_data.append({
-                    "CandidateID": candidate_id,
+                    "CandidateID": emp_id,
                     "Pull Status": "FAILED",
                     "BOT Comments": str(e),
                     "Data Extracted (files)": ""
@@ -418,9 +419,9 @@ def ERP_to_PS_Pull(db_conn=None):
             </html>
             """
 
-            send_smtp_email(
-                subject=f"ERP to  PeopleStrong Pull Pending | {datetime.now().strftime('%d-%m-%Y')}",
-                html_body=html_body
-            )
+            # send_smtp_email(
+            #     subject=f"ERP to  PeopleStrong Pull Pending | {datetime.now().strftime('%d-%m-%Y')}",
+            #     html_body=html_body
+            # )
 
         logging.info("===== ERP → PEOPLESTRONG PULL COMPLETE =====")
