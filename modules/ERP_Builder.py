@@ -27,7 +27,7 @@ def build_erp_payload(row):
         "Address-zip": scalar(row.get("PIN")),
         "Address-city": scalar(row.get("City")),
         "Address-state": scalar(row.get("State")),
-        "Address-country_id|disp": scalar(row.get("Country")),
+        "Address-country_id|disp": full_country_name(scalar(row.get("Country"))),
         "LocalAddress": scalar(row.get("LocalAddress")),
         "HomeAddress": scalar(row.get("HomeAddress")),
 
@@ -40,7 +40,7 @@ def build_erp_payload(row):
         "EmpCustomization-is_highest": scalar(row.get("Is Highest Qualification")),
 
         # ================= EMERGENCY =================
-        "EmergyPhone": f'{row.get("Emergency Contact Number").lstrip("+").replace(" ", "")[:3]}-{row.get("Emergency Contact Number").lstrip("+").replace(" ", "")[3:]}',
+        "EmergyPhone": (lambda x: f"{x[:3]}-{x[3:]}" if x else "")(scalar(row.get("Emergency Contact Number")).lstrip("+").replace(" ", "")),
         "EmergyPhoneDetails": scalar(row.get("Emergency Contact Relation")) + "-" + scalar(row.get("Emergency Contact Name")),
 
         # ================= ID =================
@@ -87,24 +87,9 @@ def build_erp_payload(row):
         "EmployeeContract-designation_id|disp": scalar(row.get("client designation")),
         "EmployeeContract-clientauth": scalar(row.get("client authorization details")),
         "EmployeeContract-startdate": fmt_date(scalar(row.get("Date of joining"))),
-        "EmployeeContract-employeestatus_id|disp": scalar(row.get("Final Employment Status")),
-
-        # ================= SALARY =================
-        "SalaryHead_Basic": scalar(row.get("Salary_Basic")),
-        "SalaryHead_HRA": scalar(row.get("Salary_HRA")),
-        "SalaryHead_Food": scalar(row.get("Salary_Food")),
-        "SalaryHead_Transport": scalar(row.get("Salary_Transport")),
-        "SalaryHead_Telephone": scalar(row.get("Salary_Telephone")),
-        "SalaryHead_Medical": scalar(row.get("Salary_Medical")),
-        "SalaryHead_Electricity": scalar(row.get("Salary_Electricity")),
-        "SalaryHead_Other Allowance": scalar(row.get("Salary_Other")),
-        "SalaryHead_Variable Allowance": scalar(row.get("Salary_Variable")),
-        "SalaryHead_Annual Leave Allowance": scalar(row.get("Salary_AnnualLeave")),
-        "SalaryHead_Airfare Allowance": scalar(row.get("Salary_Airfare")),
-        "Salary-startdate": fmt_date(scalar(row.get("Salary_EffectiveDate")))
+        "EmployeeContract-employeestatus_id|disp": scalar(row.get("Final Employment Status"))        
     }
 
     payload = field_inspector(payload)
     logging.info("[PHASE 6] ERP Payload AFTER validation")
     return payload
-
