@@ -68,7 +68,6 @@ def load_csvs(sftp):
         raise RuntimeError("Invalid Mapping filename format in Mapping CSV")
 
     batch_date_str = m.group(1)  # e.g., '14022026'
-    # batch_date_str="18022026"
     batch_date = datetime.strptime(batch_date_str, "%d%m%Y").date()
     logging.info(f"[PHASE 2] Selected batch date: {batch_date_str}")
 
