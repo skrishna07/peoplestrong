@@ -192,7 +192,33 @@ def scalar(val):
     return str(val).strip()
 
 
+def scalar_int(val):
+    val_str = scalar(val)
+    if val_str == "":
+        return "0"
+    try:
+        result = str(int(float(val_str)))
+        print(f"Converting {val_str} → {result}")
+        return result
+    except ValueError:
+        print(f"Failed to convert {val_str}, defaulting to 0")
+        return "0"
+    
 
+def full_country_name(country_code: str) -> str:
+    """
+    Convert common country abbreviations to full country names.
+    If not found, return the original input.
+    """
+    mapping = {
+        "UAE": "United Arab Emirates",
+        "IND": "India",
+        "USA": "United States of America",
+        "UK": "United Kingdom",
+        # add more as needed
+    }
+    # Strip whitespace and uppercase for matching, return mapped full name if found
+    return mapping.get(country_code.strip().upper(), country_code.strip())
 
 
 def print_peoplestrong_snapshot(row):
