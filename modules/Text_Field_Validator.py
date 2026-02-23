@@ -72,9 +72,9 @@ def field_inspector(payload):
     }
 
     employee_status_ids = {
-        "single": 1,
-        "married": 2
-    }
+    "Prospective Hire": "Onboarding",  # ERP ID for Onboarding
+    "Active": "Working"            # ERP ID for Working
+}
 
     probation_allowed = {
         30: "1 Month",
@@ -150,7 +150,8 @@ def field_inspector(payload):
 
         # ---------- EMPLOYEE STATUS ----------
         elif k == "EmployeeContract-employeestatus_id|disp":
-            fixed["EmployeeContract-employeestatus_id|disp"] = employee_status_ids.get(val.lower(), 1)
+            #val is Prospective Hire
+            fixed[k] = employee_status_ids.get(val.strip(), "Onboarding")
 
         # ---------- PROBATION ----------
         elif k == "EmployeeContract-probationperiod":

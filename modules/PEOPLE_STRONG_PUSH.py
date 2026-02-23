@@ -104,6 +104,8 @@ def PS_to_ERP_Push(db_conn=None):
 
     # ------------------- Phase 5: Build Master DataFrame -------------------
     master = build_master_dataframe(dfs)
+    # Replace NaN with empty string to avoid errors in payload generation
+    master.fillna("", inplace=True)
     # ------------------- Phase 5a: Safety Check on IDs -------------------
     if not master.empty:
         logging.info("[SAFETY CHECK] Verifying PeopleStrong IDs and ERP IDs")
@@ -202,7 +204,7 @@ def PS_to_ERP_Push(db_conn=None):
         # ------------------- Phase 6c: Push to ERP -------------------
         try:
             if not erp_done:
-                status, resp = send_to_erp(erpid, payload_data=Text_payload, file_data=File_Payload)
+                status, resp = send_to_erp(erpid=cid, payload_data=Text_payload, file_data=File_Payload)
                 bot_comment = "Synced Successfully" if status == STATUS_SUCCESS else f"Failed: {resp}"
 
                 save_to_queue(candidate_id=cid, erpid=erpid,
