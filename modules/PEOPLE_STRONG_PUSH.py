@@ -34,7 +34,7 @@ def record_pending_ids(db_conn, candidate_ids, reason="No candidate data found �
     for cid in candidate_ids:
         save_to_queue(
             candidate_id=cid,
-            erpid="N/A",
+            erpid=cid,
             overall_status=STATUS_PENDING,
             comments=reason,
             db_conn=db_conn
@@ -145,11 +145,11 @@ def PS_to_ERP_Push(db_conn=None):
         if not erpid or not is_erp_id_valid(erpid):
             logging.warning(f"[SKIP] ERPID invalid or not found in ERP — skipping candidate: {cid} | ERPID: {erpid}")
             save_to_queue(candidate_id=cid,
-                          erpid=erpid if erpid else "N/A",
+                          erpid=erpid,
                           overall_status=STATUS_PENDING,
                           comments="ERP ID invalid or not found — pending",
                           db_conn=db_conn)
-            push_data.append({"CandidateID": cid, "ERPID": erpid if erpid else "N/A",
+            push_data.append({"CandidateID": cid, "ERPID": erpid ,
                               "status": STATUS_FAILED,
                               "comments": "ERP ID invalid or not found — pending"})
             continue
@@ -207,9 +207,8 @@ def PS_to_ERP_Push(db_conn=None):
         # ------------------- Phase 6c: Push to ERP -------------------
         try:
             if not erp_done:
-                #status, resp = send_to_erp(erpid=cid, payload_data=Text_payload, file_data=File_Payload)
-                status=STATUS_SUCCESS
-                resp=200
+                status, resp = send_to_erp(erpid=cid, payload_data=Text_payload, file_data=File_Payload)
+                
                 bot_comment = "Synced Successfully" if status == STATUS_SUCCESS else f"Failed: {resp}"
 
                 save_to_queue(candidate_id=cid, erpid=erpid,
@@ -255,10 +254,10 @@ def PS_to_ERP_Push(db_conn=None):
         all_success = all(item["status"] == STATUS_SUCCESS for item in push_data)
         if all_success:
             logging.info("[PHASE 9] All candidates synced successfully. Sending push summary email...")
-            #send_push_summary_email(push_data)
+            send_push_summary_email(push_data)
         else:
             logging.info("[PHASE 9] Not all candidates synced successfully. Sending ERP error summary...")
-            #send_erp_error_summary(push_data)
+            send_erp_error_summary(push_data)
 
     # ------------------- Phase 10: Batch Summary -------------------
     total_candidates = len(push_data)

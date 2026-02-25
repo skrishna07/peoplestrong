@@ -19,7 +19,7 @@ ENV/
 Thumbs.db
 
 # Environment variables
-.env
+
 
 
 
@@ -29,6 +29,33 @@ Thumbs.db
 
 # Misc
 *.sqlite3
-*.db
+
 *.bak
 *.tmp
+
+
+
+# Data & reports
+Data_files/
+PH20251009105742907/
+*.csv
+*.xlsx
+*.pdf
+*.jpg
+*.jpeg
+*.png
+
+# Logs
+logs/
+*.log
+
+# Temp & debug
+debug_dump/
+__pycache__/
+*.curl
+*.ipynb
+temp_*.csv
+
+# OS / tools
+AzuriteConfig
+__azurite_db_*.json

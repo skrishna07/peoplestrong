@@ -203,8 +203,8 @@ def Push_Pending(db_conn=None):
     if not pending_candidates:
         logging.info("[INFO] No pending candidates found.")
         return
-    logging.info(f"[INFO] Found {len(pending_candidates)} pending candidates.")
 
+    logging.info(f"[INFO] Found {len(pending_candidates)} pending candidates.")
     push_data = []
 
     # -------------------- Process Each Candidate --------------------
@@ -235,13 +235,12 @@ def Push_Pending(db_conn=None):
 
             # -------------------- Rebuild Payload from Batch --------------------
             text_payload, file_payload = None, None
+            text_payload_dict = None
 
             if batch_date and source_file:
                 try:
                     source_files = json.loads(source_file)
-                    logging.debug(f"[DEBUG] Candidate {cid} source_files: {source_files}")
-                except Exception as e:
-                    logging.warning(f"[WARN] Candidate {cid} has invalid source_file JSON: {e}")
+                except Exception:
                     source_files = []
 
                 if source_files:
@@ -253,31 +252,17 @@ def Push_Pending(db_conn=None):
                             source_files=source_files,
                             candidate_id=cid
                         )
-                        logging.debug(f"[DEBUG] Candidate {cid} rebuilt text_payload type: {type(text_payload)}, file_payload type: {type(file_payload)}")
-                    except Exception as e:
-                        logging.error(f"[ERROR] Candidate {cid} payload rebuild failed: {e}")
                     finally:
                         sftp.close()
                         ssh.close()
 
-                    # Convert DataFrame to dict for JSON serialization
-                    if text_payload is not None and hasattr(text_payload, 'iloc'):
-                        if not text_payload.empty:
-                            try:
-                                text_payload_dict = text_payload.iloc[0].to_dict()
-                                logging.debug(f"[DEBUG] Candidate {cid} text_payload_dict: {text_payload_dict}")
-                            except Exception as e:
-                                logging.error(f"[ERROR] Candidate {cid} text_payload conversion failed: {e}")
-                                text_payload_dict = None
-                        else:
-                            text_payload_dict = None
-                    else:
-                        text_payload_dict = text_payload  # in case already dict
+                    # Convert DataFrame to dict
+                    if text_payload is not None and not text_payload.empty:
+                        text_payload_dict = text_payload.iloc[0].to_dict()
 
                     text_done = 1 if text_payload_dict else 0
                     file_done = 1 if file_payload else 0
 
-                    # Save rebuilt payload to queue
                     save_to_queue(
                         candidate_id=cid,
                         erpid=erpid_db,
@@ -287,75 +272,119 @@ def Push_Pending(db_conn=None):
                         overall_status=STATUS_PENDING if erp_done == 0 else STATUS_SUCCESS,
                         db_conn=db_conn
                     )
+
                     logging.info(f"[PAYLOAD] Candidate {cid} → text_done={text_done}, file_done={file_done}")
 
                 else:
                     logging.warning(f"[WARN] Candidate {cid} has no valid source files")
-                    save_to_queue(candidate_id=cid, erpid=erpid_db,
-                                  text_done=text_done, file_done=file_done,
-                                  overall_status=STATUS_PENDING,
-                                  comments="No valid source files for rebuild",
-                                  db_conn=db_conn)
-                    push_data.append({
-                        "CandidateID": cid, "ERPID": erpid_db,
-                        "status": STATUS_PENDING,
-                        "comments": "No valid source files for rebuild"
-                    })
                     continue
-
             else:
                 logging.warning(f"[WARN] Candidate {cid} missing batch_date or source_file")
-                save_to_queue(candidate_id=cid, erpid=erpid_db,
-                              text_done=text_done, file_done=file_done,
-                              overall_status=STATUS_PENDING,
-                              comments="Missing batch info — cannot rebuild payloads",
-                              db_conn=db_conn)
-                push_data.append({
-                    "CandidateID": cid, "ERPID": erpid_db,
-                    "status": STATUS_PENDING,
-                    "comments": "Missing batch info — cannot rebuild payloads"
-                })
                 continue
 
             # -------------------- ERP Push --------------------
-            if text_done and erp_done != 1:
-                try:
-                    logging.debug(f"[DEBUG] Candidate {cid} sending ERP push: payload type={type(text_payload_dict)}, file type={type(file_payload)}")
-                    text_payload_dict = build_erp_payload(text_payload.iloc[0]) if text_payload is not None else None
-                    status, response = send_to_erp(erpid_db,
-                                                   payload_data=text_payload_dict,
-                                                   file_data=file_payload)
-                    overall_status = STATUS_SUCCESS if status == STATUS_SUCCESS and file_payload else STATUS_PENDING
-                    erp_done = 1 if overall_status == STATUS_SUCCESS else 0
 
-                    save_to_queue(candidate_id=cid,
-                                  erpid=erpid_db,
-                                  erp_done=erp_done,
-                                  overall_status=status,
-                                  comments=response,
-                                  db_conn=db_conn)
-                    logging.info(f"[ERP PUSH] Candidate {cid} → {status} | Response: {response}")
-                    push_data.append({"CandidateID": cid, "ERPID": erpid_db, "status": status, "comments": response})
+            # CASE 1: Send TEXT first (only once)
+            if text_done == 1 and erp_done == 0 and overall_status != "TEXT_SENT":
+                try:
+                    logging.info(f"[ERP TEXT PUSH] Sending TEXT for {cid}")
+
+                    payload = build_erp_payload(text_payload.iloc[0])
+
+                    status, response = send_to_erp(
+                        erpid_db,
+                        payload_data=payload,
+                        file_data=None
+                    )
+
+                    if status == STATUS_SUCCESS:
+                        overall_status = "TEXT_SENT"
+                    else:
+                        overall_status = STATUS_PENDING
+
+                    save_to_queue(
+                        candidate_id=cid,
+                        erpid=erpid_db,
+                        overall_status=overall_status,
+                        comments=response,
+                        db_conn=db_conn
+                    )
+
+                    push_data.append({
+                        "CandidateID": cid,
+                        "ERPID": erpid_db,
+                        "status": overall_status,
+                        "comments": response
+                    })
+
                 except Exception as e:
-                    logging.error(f"[ERP PUSH ERROR] Candidate {cid} → {e}")
+                    logging.error(f"[ERP TEXT ERROR] Candidate {cid} → {e}")
+                    save_to_queue(candidate_id=cid,
+                                  overall_status=STATUS_PENDING,
+                                  comments=str(e),
+                                  db_conn=db_conn)
+
+            # CASE 2: File available later → Send FILE
+            elif file_done == 1 and erp_done == 0:
+                try:
+                    logging.info(f"[ERP FILE PUSH] Sending FILE for {cid}")
+
+                    status, response = send_to_erp(
+                        erpid_db,
+                        payload_data=None,
+                        file_data=file_payload
+                    )
+
+                    if status == STATUS_SUCCESS:
+                        erp_done = 1
+                        overall_status = STATUS_SUCCESS
+                    else:
+                        erp_done = 0
+                        overall_status = STATUS_PENDING
+
+                    save_to_queue(
+                        candidate_id=cid,
+                        erpid=erpid_db,
+                        erp_done=erp_done,
+                        overall_status=overall_status,
+                        comments=response,
+                        db_conn=db_conn
+                    )
+
+                    push_data.append({
+                        "CandidateID": cid,
+                        "ERPID": erpid_db,
+                        "status": overall_status,
+                        "comments": response
+                    })
+
+                except Exception as e:
+                    logging.error(f"[ERP FILE ERROR] Candidate {cid} → {e}")
                     save_to_queue(candidate_id=cid,
                                   erp_done=0,
-                                  overall_status=STATUS_FAILED,
-                                  comments=f"ERP push failed: {e}",
+                                  overall_status=STATUS_PENDING,
+                                  comments=str(e),
                                   db_conn=db_conn)
-                    push_data.append({"CandidateID": cid, "ERPID": erpid_db, "status": STATUS_FAILED, "comments": str(e)})
+
+            # CASE 3: Waiting
             else:
-                logging.info(f"[SKIP] ERP push skipped for Candidate {cid}: text_done={text_done}, file_done={file_done}, erp_done={erp_done}")
-                push_data.append({"CandidateID": cid, "ERPID": erpid_db, "status": STATUS_PENDING, "comments": "Pending for ERP push"})
+                logging.info(f"[WAITING] Candidate {cid} waiting for remaining data.")
+                push_data.append({
+                    "CandidateID": cid,
+                    "ERPID": erpid_db,
+                    "status": STATUS_PENDING,
+                    "comments": "Waiting for remaining data"
+                })
 
         except Exception as e:
             logging.error(f"[ERROR] Candidate {cid} failed: {e}")
-            save_to_queue(candidate_id=cid, erpid=erpid_db or "N/A",
-                          overall_status=STATUS_FAILED, comments=str(e),
+            save_to_queue(candidate_id=cid,
+                          erpid=erpid_db or "N/A",
+                          overall_status=STATUS_FAILED,
+                          comments=str(e),
                           db_conn=db_conn)
-            push_data.append({"CandidateID": cid, "ERPID": erpid_db or "N/A", "status": STATUS_FAILED, "comments": str(e)})
 
-    # -------------------- Phase 4: Pending Summary --------------------
+    # -------------------- Summary --------------------
     if push_data:
         total = len(push_data)
         success_count = sum(1 for x in push_data if x["status"] == STATUS_SUCCESS)
@@ -364,29 +393,10 @@ def Push_Pending(db_conn=None):
 
         logging.info("=" * 80)
         logging.info("PENDING PROCESS SUMMARY")
-        logging.info(f"Total Processed: {total}")
+        logging.info(f"Total: {total}")
         logging.info(f"Success: {success_count}")
-        logging.info(f"Still Pending: {pending_count}")
+        logging.info(f"Pending: {pending_count}")
         logging.info(f"Failed: {failed_count}")
-        logging.info("-" * 80)
-
-        # Reason breakdown
-        reason_counter = {}
-        for item in push_data:
-            reason = item.get("comments") or "No Comments"
-            reason_counter[reason] = reason_counter.get(reason, 0) + 1
-
-        logging.info("Reason Breakdown:")
-        for reason, count in reason_counter.items():
-            logging.info(f" - {reason} → {count}")
-
         logging.info("=" * 80)
-    else:
-        logging.info("[SUMMARY] No pending candidates were processed.")
 
     logging.info("========== PENDING PUSH COMPLETE ==========")
-
-if __name__=='__main__':
-    Push_Pending()
-else:
-    print("Error")

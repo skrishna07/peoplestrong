@@ -4,7 +4,7 @@ import sqlite3
 import os
 import logging
 
-DB_FILE = "Production_erp_sync_queue.db"
+DB_FILE = "Production_erp_sync_queue1.db"
 FILE_DIR = "pending_files"
 CSV_FILE = os.path.join(FILE_DIR, "pending_sync.csv")
 
