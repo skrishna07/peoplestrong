@@ -151,8 +151,33 @@ def remove_from_queue(candidate_id, db_conn=None):
         logging.error(f"[DB] Failed to remove candidate {candidate_id} from queue: {e}")
 
 
+# def fetch_pending_candidates(db_conn=None):
+#     """Fetch all candidates that have not completed ERP push yet."""
+#     try:
+#         own_conn = False
+#         if db_conn is None:
+#             db_conn = sqlite3.connect(DB_FILE)
+#             own_conn = True
+
+#         c = db_conn.cursor()
+#         c.execute("""
+#             SELECT candidate_id, erpid,batch_date, text_payload, file_path, text_done, file_done, erp_done,
+#                    overall_status, comments, source_file, mapping_file
+#             FROM pending_sync
+#             WHERE erp_done=0
+#             ORDER BY created_at ASC
+#         """)
+#         rows = c.fetchall()
+#         if own_conn:
+#             db_conn.close()
+#         return rows
+#     except Exception as e:
+#         logging.error(f"[DB] Failed to fetch pending candidates: {e}")
+#         return []
+
+
 def fetch_pending_candidates(db_conn=None):
-    """Fetch all candidates that have not completed ERP push yet."""
+    """Fetch all candidates that are not fully synced (text/file/ERP)."""
     try:
         own_conn = False
         if db_conn is None:
@@ -161,20 +186,88 @@ def fetch_pending_candidates(db_conn=None):
 
         c = db_conn.cursor()
         c.execute("""
-            SELECT candidate_id, erpid,batch_date, text_payload, file_path, text_done, file_done, erp_done,
-                   overall_status, comments, source_file, mapping_file
+            SELECT candidate_id,
+                   erpid,
+                   batch_date,
+                   text_payload,
+                   file_path,
+                   IFNULL(text_done, 0) AS text_done,
+                   IFNULL(file_done, 0) AS file_done,
+                   IFNULL(erp_done, 0) AS erp_done,
+                   overall_status,
+                   comments,
+                   source_file,
+                   mapping_file
             FROM pending_sync
-            WHERE erp_done=0
+            WHERE IFNULL(erp_done, 0) = 0
+               OR IFNULL(text_done, 0) = 0
+               OR IFNULL(file_done, 0) = 0
             ORDER BY created_at ASC
         """)
+
         rows = c.fetchall()
+
         if own_conn:
             db_conn.close()
+
         return rows
+
     except Exception as e:
         logging.error(f"[DB] Failed to fetch pending candidates: {e}")
         return []
 
+
+
+
+def fetch_recent_pending_candidates(db_conn=None, recent_ids=None):
+    """Fetch pending candidates from DB, optionally filtered by recent IDs."""
+    try:
+        own_conn = False
+        if db_conn is None:
+            db_conn = sqlite3.connect(DB_FILE)
+            own_conn = True
+
+        c = db_conn.cursor()
+
+        query = """
+            SELECT candidate_id,
+                   erpid,
+                   batch_date,
+                   text_payload,
+                   file_path,
+                   IFNULL(text_done, 0) AS text_done,
+                   IFNULL(file_done, 0) AS file_done,
+                   IFNULL(erp_done, 0) AS erp_done,
+                   overall_status,
+                   comments,
+                   source_file,
+                   mapping_file
+            FROM pending_sync
+            WHERE (IFNULL(erp_done, 0) = 0
+               OR IFNULL(text_done, 0) = 0
+               OR IFNULL(file_done, 0) = 0)
+        """
+
+        params = ()
+        if recent_ids:
+            placeholders = ",".join("?" for _ in recent_ids)
+            query += f" AND candidate_id IN ({placeholders})"
+            params = tuple(recent_ids)
+
+        query += " ORDER BY created_at ASC"
+
+        c.execute(query, params)
+        rows = c.fetchall()
+
+        if own_conn:
+            db_conn.close()
+
+        return rows
+
+    except Exception as e:
+        logging.error(f"[DB] Failed to fetch pending candidates: {e}")
+        return []
+    
 
 
 

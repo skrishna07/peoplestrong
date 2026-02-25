@@ -6,7 +6,7 @@ from modules.Files_Field_Validator import *
 from modules.Sql_Helper import *
 from modules.Pending_Process import *
 from modules.Csv_File_Handler import *
-from api_handler.Ps_to_Erp_Requestor import send_to_erp
+from api_handler.Ps_to_Erp_Requestor import send_to_erp,is_erp_id_valid
 from modules.Document_Base64_Generator import get_candidate_document_links
 from modules.ERP_Builder import *
 
@@ -14,207 +14,379 @@ from modules.ERP_Builder import *
 
 
 
+def rebuild_payload_from_batch(sftp, batch_date, source_files, candidate_id):
+    """
+    Rebuilds text & file payloads for ONE candidate using batch CSV files.
+    Applies same normalization logic as build_master_dataframe().
+    """
+
+    logging.info(f"[REBUILD] Starting rebuild for Candidate: {candidate_id}")
+
+    dfs = {}
+
+    # ---------------- LOAD & FILTER CSV FILES ----------------
+    for file_name in source_files:
+        df = None
+
+        for dir_path in [IMPORT_DIR, ARCHIVE_DIR]:
+            try:
+                path = f"{dir_path}/{file_name}"
+                with sftp.open(path, "rb") as fh:
+                    if "Contact" in file_name:
+                        df = robust_pipe_reader(fh)
+                    else:
+                        df = pd.read_csv(io.BytesIO(fh.read()), sep="|", dtype=str)
+
+                df.columns = df.columns.str.strip()
+                break
+            except FileNotFoundError:
+                continue
+
+        if df is None or JOIN_KEY not in df.columns:
+            continue
+
+        df[JOIN_KEY] = df[JOIN_KEY].astype(str).str.strip()
+        df = df[df[JOIN_KEY] == str(candidate_id)]
+
+        if df.empty:
+            continue
+
+        prefix = next((p for p in [
+            "CandidateData",
+            "CandidateContact",
+            "CandidateEducation",
+            "CandidateEmergencyContact",
+            "CandidateIDDetails",
+            "CandidateSalaryData"
+        ] if file_name.startswith(p)), None)
+
+        if prefix:
+            dfs[prefix] = df
+
+    # ---------------- BASE TABLE ----------------
+    master = dfs.get("CandidateData")
+    if master is None or master.empty:
+        logging.error(f"[ERROR] No CandidateData found for {candidate_id}")
+        return pd.DataFrame(), pd.DataFrame()
+
+    # ---------------- EDUCATION ----------------
+    edu_df = dfs.get("CandidateEducation")
+    if edu_df is not None and not edu_df.empty:
+        edu_df = normalize_education(edu_df)
+        master = master.merge(edu_df, on=JOIN_KEY, how="left")
+
+    # ---------------- EMERGENCY CONTACT ----------------
+    emergency_df = dfs.get("CandidateEmergencyContact")
+    if emergency_df is not None and not emergency_df.empty:
+        master = master.merge(emergency_df, on=JOIN_KEY, how="left")
+
+    # ---------------- ID DETAILS ----------------
+    id_df = dfs.get("CandidateIDDetails")
+    if id_df is not None and not id_df.empty:
+        id_df = normalize_id(id_df)
+
+        # Select main ID
+        id_main_df = (
+            id_df.groupby(JOIN_KEY, group_keys=False)
+            .apply(lambda grp: select_id_type(grp, grp.name))
+            .reset_index(drop=False)
+        )
+
+        master = master.merge(id_main_df, on=JOIN_KEY, how="left")
+
+    # ---------------- SALARY ----------------
+    sal_df = dfs.get("CandidateSalaryData")
+    if sal_df is not None and not sal_df.empty:
+        sal_df = normalize_salary(sal_df)
+        master = master.merge(sal_df, on=JOIN_KEY, how="left")
+
+    # ---------------- PRIMARY ADDRESS ----------------
+    contact_df = dfs.get("CandidateContact")
+    if contact_df is not None and not contact_df.empty:
+        primary_address = select_primary_address(contact_df, candidate_id)
+
+        if primary_address is not None:
+            primary_address_df = pd.DataFrame([primary_address])
+            master = master.merge(primary_address_df, on=JOIN_KEY, how="left")
+
+    # ---------------- REMOVE DUPLICATES ----------------
+    master = master.drop_duplicates(subset=[JOIN_KEY])
+
+    try:
+        text_payload = master
+        text_payload = text_payload.replace({pd.NaT: None})
+        text_payload = text_payload.where(pd.notnull(text_payload), None)
+    except Exception as e:
+        print("Text payload error as ",e)
+
+    # ---------------- FILE PAYLOAD ----------------
+    try:
+        file_payload = get_candidate_document_links(candidate_id)
+    except Exception:
+        file_payload = {}
+
+    # ---------------- WRITE DEBUG FILE ----------------
+    output_path = f"debug_text_payload_{candidate_id}.txt"
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(f"Text Payload for Candidate: {candidate_id}\n")
+        f.write("=" * 80 + "\n\n")
+
+        if text_payload is not None and not text_payload.empty:
+            f.write(text_payload.to_string(index=False))
+        else:
+            f.write("No data found.\n")
+
+    print(f"[DEBUG] Text payload written to {output_path}")
+
+    if text_payload is not None and not text_payload.empty:
+        print_peoplestrong_snapshot(text_payload.iloc[0])
+
+    return text_payload, file_payload
+
+
+
+
+def fetch_pending_candidates(db_conn=None):
+    """Fetch all candidates that are not fully synced (text/file/ERP)."""
+    try:
+        own_conn = False
+        if db_conn is None:
+            db_conn = sqlite3.connect(DB_FILE)
+            own_conn = True
+
+        c = db_conn.cursor()
+        c.execute("""
+            SELECT candidate_id,
+                   erpid,
+                   batch_date,
+                   text_payload,
+                   file_path,
+                   IFNULL(text_done, 0) AS text_done,
+                   IFNULL(file_done, 0) AS file_done,
+                   IFNULL(erp_done, 0) AS erp_done,
+                   overall_status,
+                   comments,
+                   source_file,
+                   mapping_file
+            FROM pending_sync
+            WHERE IFNULL(erp_done, 0) = 0
+               OR IFNULL(text_done, 0) = 0
+               OR IFNULL(file_done, 0) = 0
+            ORDER BY created_at ASC
+        """)
+
+        rows = c.fetchall()
+
+        if own_conn:
+            db_conn.close()
+
+        return rows
+
+    except Exception as e:
+        logging.error(f"[DB] Failed to fetch pending candidates: {e}")
+        return []
+
 def Push_Pending(db_conn=None):
-    """
-    Process all pending candidates from the database and push them to ERP.
-    Only runs if there are pending candidates; otherwise exits gracefully.
-    """
+    logging.info("========== PENDING PUSH START ==========")
 
-    logging.info("[PENDING] ===== PEOPLESTRONG → ERP PENDING START =====")
-    logging.info(f"[PENDING] Job Started At: {datetime.now()}")
-
-    # ------------------- Initialize DB -------------------
+    # -------------------- DB Initialization --------------------
     try:
         init_db(db_conn=db_conn)
+        logging.info("[DB] Initialized successfully.")
     except Exception as e:
-        logging.error(f"[PENDING][DB] Database initialization failed: {e}")
-        print("[PENDING] Database Not Initialized")
+        logging.error(f"[DB ERROR] Initialization failed: {e}")
         return
 
-    # ------------------- Fetch Pending Candidates -------------------
-    pending_rows = fetch_pending_candidates(db_conn=db_conn)
-    if not pending_rows:
-        logging.info("[PENDING][INFO] No pending candidates found. Skipping processing.")
-        logging.info("===== PEOPLESTRONG → ERP  Pending END =====")
-
+    # -------------------- Fetch Pending Candidates --------------------
+    pending_candidates = fetch_pending_candidates(db_conn=db_conn)
+    if not pending_candidates:
+        logging.info("[INFO] No pending candidates found.")
         return
-
-    logging.info(f"[PENDING] Total pending candidates fetched: {len(pending_rows)}")
-
-    # ------------------- Group Pending Candidates by Mapping File -------------------
-    pending_by_mapping = {}
-    for row in pending_rows:
-
-        candidate_id, erpid,batch_date, Text_payload, File_Payload, text_done, file_done, erp_done, overall_status, comments, source_file_json, mapping_file = row
-
-
-
-        
-        mapping_file = str(mapping_file)  # make sure it's a string
-
-        if mapping_file not in pending_by_mapping:
-            pending_by_mapping[mapping_file] = []
-        pending_by_mapping[mapping_file].append(row)
-
-    # ------------------- Connect SFTP -------------------
-    try:
-        ssh, sftp = get_sftp_connection()
-        logging.info("[PENDING][SFTP] Connection established")
-    except Exception as e:
-        logging.error(f"[PENDING][SFTP] Connection failed: {e}")
-        return
+    logging.info(f"[INFO] Found {len(pending_candidates)} pending candidates.")
 
     push_data = []
 
-    # ------------------- Process Each Mapping Batch -------------------
-    for mapping_file, candidates in pending_by_mapping.items():
-        logging.info(f"[PENDING][Phase 1] Processing batch for mapping file: {mapping_file} ({len(candidates)} candidates)")
-
-        # Extract batch date from mapping_file
-        m = re.match(r"Mapping_(\d{8})_\d{6}\.csv", mapping_file)
-        if not m:
-            logging.warning(f"[PENDING][WARN] Invalid mapping filename format: {mapping_file}")
-            continue
-        # batch_date = datetime.strptime(m.group(1), "%d%m%Y").date()
-
-        # ------------------- Load Source File List -------------------
-        source_file_list = json.loads(candidates[0][9] if candidates[0][9] else "[]")  # FIXED: row[9] is source_file JSON
-        if not source_file_list:
-            logging.warning(f"[PENDING][WARN] No source files found in DB for mapping {mapping_file}")
-            continue
-
-        # ------------------- Load Relevant CSVs -------------------
-        dfs = {}
+    # -------------------- Process Each Candidate --------------------
+    for candidate in pending_candidates:
         try:
-            for f in source_file_list:
-                sftp_path = f"{IMPORT_DIR}/{f}"
-                logging.info(f"[PENDING][Phase 2] Loading file {f} → {sftp_path}")
-                if "CandidateContact" in f:
-                    with sftp.open(sftp_path, "rb") as fh:
-                        df = robust_pipe_reader(fh)
-                else:
-                    with sftp.open(sftp_path, "rb") as fh:
-                        df = pd.read_csv(io.BytesIO(fh.read()), sep="|", dtype=str)
-                df.columns = df.columns.str.strip()
-                dfs[f.split("_")[0]] = df
-            logging.info(f"[PENDING][Phase 2] Loaded {len(dfs)} source files for batch {mapping_file}")
-        except Exception as e:
-            logging.error(f"[PENDING][ERROR] Failed to load source files for mapping {mapping_file}: {e}")
-            continue
+            (cid, erpid_db, batch_date, text_payload_db, file_payload_db,
+             text_done, file_done, erp_done, overall_status,
+             comments, source_file, mapping_file) = candidate
 
-        # Rename Mapping CSV column for JOIN
-        if "Mapping" not in dfs:
-            logging.warning(f"[PENDING][WARN] Mapping CSV not found in loaded files for batch {mapping_file}")
-            continue
-        dfs["Mapping"] = dfs["Mapping"].rename(columns={"PeopleStrongID": JOIN_KEY})
+            logging.info("-" * 60)
+            logging.info(f"[PROCESSING] Candidate: {cid} | ERP ID: {erpid_db} | Status: {overall_status}")
 
-        # ------------------- Build Master DataFrame -------------------
-        try:
-            master = build_master_dataframe(dfs)
-            pending_cids = [row[0] for row in candidates]  # candidate_id
-            master = master[master[JOIN_KEY].isin(pending_cids)]
-            dump_df(master, f"RPA_Master_File_Pending_{mapping_file}")
-            logging.info(f"[PENDING][Phase 3] Master dataframe built for batch {mapping_file} ({len(master)} pending candidates)")
-        except Exception as e:
-            logging.error(f"[PENDING][ERROR] Failed to build master dataframe for mapping {mapping_file}: {e}")
-            continue
-
-        # ------------------- Process Each Candidate -------------------
-        for _, r in master.iterrows():
-            cid = r[JOIN_KEY]
-            erpid = safe(r.get("ERPID"))
-
-            db_row = next((c for c in candidates if c[0] == cid), None)  # lookup by candidate_id
-            if db_row:
-                _, _, Text_payload, File_Payload, text_done, file_done, erp_done, overall_status, comments, source_file_json, mapping_file = db_row
-
-                
-            else:
-                Text_payload = File_Payload = None
-                text_done = file_done = erp_done = 0
-                overall_status = STATUS_PENDING
-                comments = None
-
-            logging.info(f"[PENDING][Phase 4] Processing candidate {cid}")
-
-            if not erpid or erpid.upper() == "N/A":
-                logging.warning(f"[PENDING][SKIP] ERPID missing for {cid}")
-                save_to_queue(
-                    candidate_id=cid,
-                    erpid="N/A",
-                    overall_status=STATUS_FAILED,
-                    comments="Missing ERPID — skipped",
-                    db_conn=db_conn
-                )
-                push_data.append({"CandidateID": cid, "ERPID": "N/A", "status": STATUS_FAILED, "comments": "Missing ERPID — skipped"})
+            # -------------------- ERP ID Validation --------------------
+            erpid_valid = erpid_db and is_erp_id_valid(erpid_db)
+            if not erpid_valid:
+                logging.warning(f"[WARN] Candidate {cid} ERP ID missing or invalid")
+                save_to_queue(candidate_id=cid, erpid=erpid_db or "N/A",
+                              overall_status=STATUS_PENDING,
+                              comments="ERP ID missing or invalid — waiting",
+                              db_conn=db_conn)
+                push_data.append({
+                    "CandidateID": cid,
+                    "ERPID": erpid_db or "N/A",
+                    "status": STATUS_PENDING,
+                    "comments": "ERP ID missing or invalid"
+                })
                 continue
 
-            try:
-                if not Text_payload:
-                    Text_payload = build_erp_payload(r)
-                if not File_Payload:
-                    File_Payload = get_candidate_document_links(cid)
+            # -------------------- Rebuild Payload from Batch --------------------
+            text_payload, file_payload = None, None
 
-                save_to_queue(
-                    candidate_id=cid,
-                    erpid=erpid,
-                    text_payload=json.dumps(Text_payload),
-                    db_conn=db_conn,
-                    batch_date=batch_date,
-                    mapping_file=mapping_file,
-                    source_file=json.dumps(source_file_list),
-                    text_done=1 if Text_payload else 0,
-                    file_done=1 if File_Payload else 0,
-                    erp_done=erp_done,
-                    overall_status=overall_status
-                )
-                logging.info(f"[PENDING][Phase 5] Payloads ready for {cid}")
-            except Exception as e:
-                logging.error(f"[PENDING][ERROR] Payload prep failed for {cid}: {e}")
-                save_to_queue(
-                    candidate_id=cid,
-                    erpid=erpid,
-                    overall_status=STATUS_FAILED,
-                    comments=f"Payload prep failed: {e}",
-                    db_conn=db_conn
-                )
-                push_data.append({"CandidateID": cid, "ERPID": erpid, "status": STATUS_FAILED, "comments": f"Payload prep failed: {e}"})
-                continue
+            if batch_date and source_file:
+                try:
+                    source_files = json.loads(source_file)
+                    logging.debug(f"[DEBUG] Candidate {cid} source_files: {source_files}")
+                except Exception as e:
+                    logging.warning(f"[WARN] Candidate {cid} has invalid source_file JSON: {e}")
+                    source_files = []
 
-            # ------------------- Push to ERP -------------------
-            try:
-                if not erp_done:
-                    status, resp = send_to_erp(erpid, payload_data=Text_payload, file_data=File_Payload)
-                    bot_comment = "Synced Successfully" if status == STATUS_SUCCESS else f"Failed: {resp}"
+                if source_files:
+                    ssh, sftp = get_sftp_connection()
+                    try:
+                        text_payload, file_payload = rebuild_payload_from_batch(
+                            sftp=sftp,
+                            batch_date=batch_date,
+                            source_files=source_files,
+                            candidate_id=cid
+                        )
+                        logging.debug(f"[DEBUG] Candidate {cid} rebuilt text_payload type: {type(text_payload)}, file_payload type: {type(file_payload)}")
+                    except Exception as e:
+                        logging.error(f"[ERROR] Candidate {cid} payload rebuild failed: {e}")
+                    finally:
+                        sftp.close()
+                        ssh.close()
+
+                    # Convert DataFrame to dict for JSON serialization
+                    if text_payload is not None and hasattr(text_payload, 'iloc'):
+                        if not text_payload.empty:
+                            try:
+                                text_payload_dict = text_payload.iloc[0].to_dict()
+                                logging.debug(f"[DEBUG] Candidate {cid} text_payload_dict: {text_payload_dict}")
+                            except Exception as e:
+                                logging.error(f"[ERROR] Candidate {cid} text_payload conversion failed: {e}")
+                                text_payload_dict = None
+                        else:
+                            text_payload_dict = None
+                    else:
+                        text_payload_dict = text_payload  # in case already dict
+
+                    text_done = 1 if text_payload_dict else 0
+                    file_done = 1 if file_payload else 0
+
+                    # Save rebuilt payload to queue
                     save_to_queue(
                         candidate_id=cid,
-                        erpid=erpid,
-                        erp_done=1 if status == STATUS_SUCCESS else 0,
-                        overall_status=status,
-                        comments=bot_comment,
+                        erpid=erpid_db,
+                        text_payload=json.dumps(text_payload_dict) if text_payload_dict else None,
+                        text_done=text_done,
+                        file_done=file_done,
+                        overall_status=STATUS_PENDING if erp_done == 0 else STATUS_SUCCESS,
                         db_conn=db_conn
                     )
-                    logging.info(f"[PENDING][Phase 6][ERP] Candidate {cid} status={status}")
+                    logging.info(f"[PAYLOAD] Candidate {cid} → text_done={text_done}, file_done={file_done}")
+
                 else:
-                    status = STATUS_SUCCESS
-                    bot_comment = "Already Synced"
-                    logging.info(f"[PENDING][Phase 6][INFO] Candidate {cid} already synced")
-            except Exception as e:
-                logging.error(f"[PENDING][ERROR] ERP push failed for {cid}: {e}")
-                status = STATUS_FAILED
-                bot_comment = f"ERP push exception: {e}"
-                save_to_queue(
-                    candidate_id=cid,
-                    erpid=erpid,
-                    overall_status=status,
-                    comments=bot_comment,
-                    db_conn=db_conn
-                )
+                    logging.warning(f"[WARN] Candidate {cid} has no valid source files")
+                    save_to_queue(candidate_id=cid, erpid=erpid_db,
+                                  text_done=text_done, file_done=file_done,
+                                  overall_status=STATUS_PENDING,
+                                  comments="No valid source files for rebuild",
+                                  db_conn=db_conn)
+                    push_data.append({
+                        "CandidateID": cid, "ERPID": erpid_db,
+                        "status": STATUS_PENDING,
+                        "comments": "No valid source files for rebuild"
+                    })
+                    continue
 
-            push_data.append({"CandidateID": cid, "ERPID": erpid, "status": status, "comments": bot_comment})
+            else:
+                logging.warning(f"[WARN] Candidate {cid} missing batch_date or source_file")
+                save_to_queue(candidate_id=cid, erpid=erpid_db,
+                              text_done=text_done, file_done=file_done,
+                              overall_status=STATUS_PENDING,
+                              comments="Missing batch info — cannot rebuild payloads",
+                              db_conn=db_conn)
+                push_data.append({
+                    "CandidateID": cid, "ERPID": erpid_db,
+                    "status": STATUS_PENDING,
+                    "comments": "Missing batch info — cannot rebuild payloads"
+                })
+                continue
 
-    logging.info(f"[PENDING] ===== PENDING PROCESS COMPLETE =====")
-    logging.info(f"[PENDING] Total pending candidates processed: {len(push_data)}")
+            # -------------------- ERP Push --------------------
+            if text_done and erp_done != 1:
+                try:
+                    logging.debug(f"[DEBUG] Candidate {cid} sending ERP push: payload type={type(text_payload_dict)}, file type={type(file_payload)}")
+                    text_payload_dict = build_erp_payload(text_payload.iloc[0]) if text_payload is not None else None
+                    status, response = send_to_erp(erpid_db,
+                                                   payload_data=text_payload_dict,
+                                                   file_data=file_payload)
+                    overall_status = STATUS_SUCCESS if status == STATUS_SUCCESS and file_payload else STATUS_PENDING
+                    erp_done = 1 if overall_status == STATUS_SUCCESS else 0
 
+                    save_to_queue(candidate_id=cid,
+                                  erpid=erpid_db,
+                                  erp_done=erp_done,
+                                  overall_status=status,
+                                  comments=response,
+                                  db_conn=db_conn)
+                    logging.info(f"[ERP PUSH] Candidate {cid} → {status} | Response: {response}")
+                    push_data.append({"CandidateID": cid, "ERPID": erpid_db, "status": status, "comments": response})
+                except Exception as e:
+                    logging.error(f"[ERP PUSH ERROR] Candidate {cid} → {e}")
+                    save_to_queue(candidate_id=cid,
+                                  erp_done=0,
+                                  overall_status=STATUS_FAILED,
+                                  comments=f"ERP push failed: {e}",
+                                  db_conn=db_conn)
+                    push_data.append({"CandidateID": cid, "ERPID": erpid_db, "status": STATUS_FAILED, "comments": str(e)})
+            else:
+                logging.info(f"[SKIP] ERP push skipped for Candidate {cid}: text_done={text_done}, file_done={file_done}, erp_done={erp_done}")
+                push_data.append({"CandidateID": cid, "ERPID": erpid_db, "status": STATUS_PENDING, "comments": "Pending for ERP push"})
 
+        except Exception as e:
+            logging.error(f"[ERROR] Candidate {cid} failed: {e}")
+            save_to_queue(candidate_id=cid, erpid=erpid_db or "N/A",
+                          overall_status=STATUS_FAILED, comments=str(e),
+                          db_conn=db_conn)
+            push_data.append({"CandidateID": cid, "ERPID": erpid_db or "N/A", "status": STATUS_FAILED, "comments": str(e)})
 
+    # -------------------- Phase 4: Pending Summary --------------------
+    if push_data:
+        total = len(push_data)
+        success_count = sum(1 for x in push_data if x["status"] == STATUS_SUCCESS)
+        pending_count = sum(1 for x in push_data if x["status"] == STATUS_PENDING)
+        failed_count = sum(1 for x in push_data if x["status"] == STATUS_FAILED)
+
+        logging.info("=" * 80)
+        logging.info("PENDING PROCESS SUMMARY")
+        logging.info(f"Total Processed: {total}")
+        logging.info(f"Success: {success_count}")
+        logging.info(f"Still Pending: {pending_count}")
+        logging.info(f"Failed: {failed_count}")
+        logging.info("-" * 80)
+
+        # Reason breakdown
+        reason_counter = {}
+        for item in push_data:
+            reason = item.get("comments") or "No Comments"
+            reason_counter[reason] = reason_counter.get(reason, 0) + 1
+
+        logging.info("Reason Breakdown:")
+        for reason, count in reason_counter.items():
+            logging.info(f" - {reason} → {count}")
+
+        logging.info("=" * 80)
+    else:
+        logging.info("[SUMMARY] No pending candidates were processed.")
+
+    logging.info("========== PENDING PUSH COMPLETE ==========")
+
+if __name__=='__main__':
+    Push_Pending()
+else:
+    print("Error")

@@ -15,7 +15,6 @@ from modules.SEND_EMAIL_SUMMARY import send_push_summary_email, send_mapping_ale
 from modules.Pending_Process import Push_Pending
 from modules.ERP_Builder import build_erp_payload
 from concurrent.futures import ThreadPoolExecutor
-import json
 
 REPORT_FILE = "PeopleStrong_Master_Report.xlsx"
 
@@ -156,7 +155,11 @@ def PS_to_ERP_Push(db_conn=None):
             continue
 
         # Fetch pending candidate state from DB
-        pending = fetch_pending_candidates(db_conn=db_conn)
+   
+
+        logging.info(f"[INFO] Fetching pending candidates for current batch IDs: {all_mapping_ids}")
+        pending = fetch_recent_pending_candidates(db_conn=db_conn, recent_ids=all_mapping_ids)
+        logging.info(f"[INFO] Found {len(pending)} pending candidates in DB for this batch")
         candidate_in_db = next((c for c in pending if c[0] == cid), None)
 
         if candidate_in_db:
@@ -204,7 +207,9 @@ def PS_to_ERP_Push(db_conn=None):
         # ------------------- Phase 6c: Push to ERP -------------------
         try:
             if not erp_done:
-                status, resp = send_to_erp(erpid=cid, payload_data=Text_payload, file_data=File_Payload)
+                #status, resp = send_to_erp(erpid=cid, payload_data=Text_payload, file_data=File_Payload)
+                status=STATUS_SUCCESS
+                resp=200
                 bot_comment = "Synced Successfully" if status == STATUS_SUCCESS else f"Failed: {resp}"
 
                 save_to_queue(candidate_id=cid, erpid=erpid,
@@ -250,10 +255,10 @@ def PS_to_ERP_Push(db_conn=None):
         all_success = all(item["status"] == STATUS_SUCCESS for item in push_data)
         if all_success:
             logging.info("[PHASE 9] All candidates synced successfully. Sending push summary email...")
-            send_push_summary_email(push_data)
+            #send_push_summary_email(push_data)
         else:
             logging.info("[PHASE 9] Not all candidates synced successfully. Sending ERP error summary...")
-            send_erp_error_summary(push_data)
+            #send_erp_error_summary(push_data)
 
     # ------------------- Phase 10: Batch Summary -------------------
     total_candidates = len(push_data)
