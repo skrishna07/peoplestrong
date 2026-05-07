@@ -27,6 +27,96 @@ def create_remote_folder(sftp, remote_path):
         print(f"✅ Remote folder already exists: {remote_path}")
 
 
+def _ensure_sftp_dir_recursive(sftp, remote_dir):
+    parts = [p for p in remote_dir.strip('/').split('/') if p]
+    current = ""
+    for part in parts:
+        current = f"{current}/{part}" if current else f"/{part}"
+        try:
+            sftp.stat(current)
+        except Exception:
+            sftp.mkdir(current)
+
+
+def _dedupe_csv_content_for_upload(local_csv_path):
+    df = pd.read_csv(local_csv_path, dtype=str)
+    if df.empty:
+        return df.to_csv(index=False)
+
+    key_candidates = [
+        "candidate_id", "CandidateID", "Candidate ID",
+        "peopleStrong_id", "PeopleStrongID", "ERPID", "erpid"
+    ]
+    existing_map = {str(col).strip().lower(): col for col in df.columns}
+
+    key_col = None
+    for key in key_candidates:
+        col = existing_map.get(key.strip().lower())
+        if col:
+            key_col = col
+            break
+
+    if key_col is None:
+        key_col = df.columns[0]
+
+    before = len(df)
+    df[key_col] = df[key_col].astype(str).str.strip()
+    df = df[df[key_col].notna()]
+    df = df[df[key_col] != ""]
+    df = df.drop_duplicates(subset=[key_col], keep='last')
+    after = len(df)
+
+    if before != after:
+        logging.info(f"[DEBUGGING] Deduped {os.path.basename(local_csv_path)} on key '{key_col}': {before} -> {after}")
+
+    return df.to_csv(index=False)
+
+
+def sync_data_master_to_sftp_debugging(sftp, local_data_master="data_master"):
+    """
+    Mirror local data_master folder to SFTP /Outbound/debugging.
+    CSV files are uploaded with mandatory unique-key enforcement.
+    """
+    try:
+        if not os.path.isdir(local_data_master):
+            logging.warning(f"[DEBUGGING] Local folder not found: {local_data_master}")
+            return 0
+
+        outbound_root = ARCHIVE_DIR.rsplit('/', 1)[0] if '/' in ARCHIVE_DIR else ARCHIVE_DIR
+        remote_debug_root = f"{outbound_root}/debugging"
+        _ensure_sftp_dir_recursive(sftp, remote_debug_root)
+
+        uploaded = 0
+        for root, _, files in os.walk(local_data_master):
+            rel_dir = os.path.relpath(root, local_data_master).replace('\\', '/')
+            remote_dir = remote_debug_root if rel_dir == '.' else f"{remote_debug_root}/{rel_dir}"
+            _ensure_sftp_dir_recursive(sftp, remote_dir)
+
+            for file_name in files:
+                local_path = os.path.join(root, file_name)
+                remote_path = f"{remote_dir}/{file_name}"
+
+                try:
+                    if file_name.lower().endswith('.csv'):
+                        csv_content = _dedupe_csv_content_for_upload(local_path)
+                        with sftp.open(remote_path, 'w') as out_f:
+                            out_f.write(csv_content)
+                    else:
+                        with open(local_path, 'rb') as in_f, sftp.open(remote_path, 'wb') as out_f:
+                            out_f.write(in_f.read())
+
+                    uploaded += 1
+                except Exception as upload_err:
+                    logging.error(f"[DEBUGGING] Failed to upload {local_path} -> {remote_path}: {upload_err}")
+
+        logging.info(f"[DEBUGGING] Synced data_master to {remote_debug_root}. Files uploaded: {uploaded}")
+        return uploaded
+
+    except Exception as e:
+        logging.error(f"[DEBUGGING] sync_data_master_to_sftp_debugging failed: {e}")
+        return 0
+
+
 
 
 

@@ -52,16 +52,26 @@ def load_csvs(sftp):
         "Mapping"
     ]
 
-    files = sftp.listdir(IMPORT_DIR)
+    import_files = sftp.listdir(IMPORT_DIR)
+    archive_files = sftp.listdir(ARCHIVE_DIR)
+    files = list(set(import_files + archive_files))
     dfs = {}
     source_files = []
+    source_lookup = {}
 
-    logging.info("[PHASE 2] Loading PeopleStrong CSVs")
+    logging.info("[PHASE 2] Loading PeopleStrong CSVs from IMPORT + ARCHIVE")
 
     # ---------------- STEP 1: Pick latest Mapping ----------------
     mapping_file = latest_file(files, "Mapping")
     if not mapping_file:
         raise RuntimeError("No Mapping file found")
+
+    if mapping_file in import_files:
+        source_lookup[mapping_file] = IMPORT_DIR
+    elif mapping_file in archive_files:
+        source_lookup[mapping_file] = ARCHIVE_DIR
+    else:
+        raise RuntimeError(f"Could not resolve source directory for Mapping file: {mapping_file}")
 
     m = re.match(r"Mapping_(\d{8})_\d{6}\.csv", mapping_file)
     if not m:
@@ -79,11 +89,23 @@ def load_csvs(sftp):
         matched = [f for f in batch_files if f.startswith(p)]
         if not matched:
             raise RuntimeError(f"Missing {p} file for batch {batch_date_str}")
-        f = matched[0]  # pick the file
+
+        if p == "Mapping":
+            f = mapping_file
+        else:
+            f = latest_file(matched, p) or matched[0]
+
+        if f in import_files:
+            file_dir = IMPORT_DIR
+        elif f in archive_files:
+            file_dir = ARCHIVE_DIR
+        else:
+            raise RuntimeError(f"Could not resolve source directory for file: {f}")
 
         source_files.append(f)
+        source_lookup[f] = file_dir
 
-        sftp_path = f"{IMPORT_DIR}/{f}"
+        sftp_path = f"{file_dir}/{f}"
         logging.info(f"[PHASE 2] Reading file: {f} → {sftp_path}")
 
         if p == "CandidateContact":
@@ -109,6 +131,7 @@ def load_csvs(sftp):
 
     logging.info("[PHASE 2] All CSV files loaded successfully")
 
+    load_csvs.source_lookup = source_lookup
     return dfs, batch_date, mapping_file, source_files
 
 

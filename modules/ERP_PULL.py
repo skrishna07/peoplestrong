@@ -1,9 +1,8 @@
-
-
-from libraries import *
+﻿from libraries import *
 from modules.Helpers import *
 from modules.SEND_EMAIL_SUMMARY import send_pull_summary_email,send_smtp_email
 from modules.Sql_Helper import init_db,update_pull_status,fetch_pull_pending_candidates
+from modules.Yes_No_Validator import ensure_tracking_files, should_skip_pull, update_pull_tracking, get_completed_pull_docs
 from api_handler.Ps_to_Erp_Requestor import is_erp_id_valid,get_erp_numeric_key
 
 
@@ -173,12 +172,13 @@ erp_to_ps_required = {
     "MOLOL-typedmolofferlcopy": "Joining–MOL_Document",
     "EmiratesID-copy": "Post_Joining–Typed_Emirates_Copy",
     "ResidenceVisaProcess-visastampreceipt": "Post_Joining–Stamped_Visa"
+    
 }
 
 
 
 
-def ERP_to_PS_Pull(db_conn=None):
+def ERP_to_PS_Pull(db_conn=None, max_ids=None):
     logging.info("=" * 80)
     logging.info("===== ERP → PEOPLESTRONG PULL START =====")
     logging.info(f"Job Started At: {datetime.now()}")
@@ -186,20 +186,21 @@ def ERP_to_PS_Pull(db_conn=None):
     stats = {"total": 0, "success": 0, "failed": 0, "skipped": 0, "pending": 0}
     pull_data = []
     ssh = None
+    sftp = None
+    latest_map = ""
+    batch_date_value = ""
 
     try:
-        # ------------------- Phase 1: Initialize DB -------------------
         try:
             init_db(db_conn=db_conn)
+            ensure_tracking_files()
         except Exception as e:
             logging.error("[DB] Database initialization failed: %s", e)
 
-        # ------------------- Phase 2: Connect SFTP -------------------
         logging.info("[PHASE 2] Establishing SFTP connection...")
         ssh, sftp = get_sftp_connection()
         logging.info("[PHASE 2] SFTP connection established successfully.")
 
-        # ------------------- Phase 3: Load Mapping File -------------------
         logging.info("[PHASE 3] Listing mapping files in archive directory '%s'...", ARCHIVE_DIR)
         mapping_files = [f for f in sftp.listdir(ARCHIVE_DIR) if f.startswith('Mapping')]
         if not mapping_files:
@@ -207,33 +208,32 @@ def ERP_to_PS_Pull(db_conn=None):
             return
 
         latest_map = sorted(mapping_files, reverse=True)[0]
+        map_match = re.search(r"Mapping_(\d{8})_", latest_map)
+        if map_match:
+            batch_date_value = datetime.strptime(map_match.group(1), "%d%m%Y").date().isoformat()
         logging.info(f"[PHASE 3] Using latest mapping file: {latest_map}")
 
-        with sftp.open(f"{ARCHIVE_DIR}/{latest_map}", "rb") as f:
-            df = pd.read_csv(io.BytesIO(f.read()), sep='|', dtype=str)
+        with sftp.open(f"{ARCHIVE_DIR}/{latest_map}", "rb") as file_obj:
+            df = pd.read_csv(io.BytesIO(file_obj.read()), sep='|', dtype=str)
 
-            # Ensure required headers exist
-            if 'ERPID' not in df.columns or 'PeopleStrongID' not in df.columns:
-                logging.error("[PHASE 3] Mapping file missing required headers. Exiting process.")
-                return
+        if 'ERPID' not in df.columns or 'PeopleStrongID' not in df.columns:
+            logging.error("[PHASE 3] Mapping file missing required headers. Exiting process.")
+            return
 
-            # Filter only valid ERP IDs (starting with PH)
-            df = df[df['ERPID'].str.startswith('PH')]
-            invalid_erp_ids = df[~df['ERPID'].str.startswith('PH')]['ERPID'].dropna().tolist()
-            if invalid_erp_ids:
-                logging.warning(f"[PHASE 3] Ignoring invalid ERP IDs in mapping file: {invalid_erp_ids}")
+        df = df[df['ERPID'].astype(str).str.startswith('PH')]
+        logging.info("[PHASE 3] Mapping file loaded correctly with ERP IDs and PeopleStrong IDs")
 
-            logging.info("[PHASE 3] Mapping file loaded correctly with ERP IDs and PeopleStrong IDs")
-
-        # ------------------- Phase 4: Pending ERP IDs -------------------
         pending_rows = fetch_pull_pending_candidates(db_conn)
         if pending_rows:
             logging.info("[PHASE 4] Resuming pending ERP IDs")
             targets = [row[1] for row in pending_rows if row[1] and row[1] != 'N/A']
         else:
-            targets = df['ERPID'].dropna().tolist()
-            targets = [tid for tid in targets if tid.strip() and tid != 'N/A']
-            logging.info(f"[PHASE 4] Processing live ERP IDs: {targets}")
+            targets = df['ERPID'].dropna().astype(str).tolist()
+            targets = [target_id for target_id in targets if target_id.strip() and target_id != 'N/A']
+
+        if isinstance(max_ids, int) and max_ids > 0:
+            targets = targets[:max_ids]
+            logging.info(f"[LIMIT] Pull processing limited to first {len(targets)} ERP ID(s).")
 
         stats["total"] = len(targets)
         if stats["total"] == 0:
@@ -253,19 +253,50 @@ def ERP_to_PS_Pull(db_conn=None):
             )
             return
 
-        # ------------------- Phase 5: Process ERP IDs -------------------
         for emp_id in targets:
             logging.info("-" * 60)
-            logging.info(f"[PHASE 4] Processing ERP ID: {emp_id}")
+            logging.info(f"[PHASE 5] Processing ERP ID: {emp_id}")
 
-            candidate_meta = []
+            docs_info = get_completed_pull_docs(emp_id)
+            missing_required_docs = [label for label in erp_to_ps_required.keys() if label not in docs_info]
+
+            if should_skip_pull(emp_id, latest_map):
+                logging.info(f"[SKIP] ERP ID {emp_id} already completed for mapping file {latest_map}. Skipping duplicate pull.")
+                stats["skipped"] += 1
+                pull_data.append({
+                    "CandidateID": emp_id,
+                    "Pull Status": "SKIPPED",
+                    "BOT Comments": "Already pulled for same mapping file",
+                    "Data Extracted (files)": ""
+                })
+                continue
 
             try:
                 emp_numeric = get_erp_numeric_key(emp_id)
 
                 if not is_erp_id_valid(emp_id):
                     logging.warning(f"[PENDING] ERP ID {emp_numeric} not generated yet. Marking as pending.")
-                    update_pull_status(emp_numeric, "PENDING", "ERP ID not yet generated", db_conn=db_conn)
+                    update_pull_status(emp_id, "PENDING", "ERP ID not yet generated", db_conn=db_conn)
+                    update_pull_tracking(
+                        candidate_id=emp_id,
+                        employee_code=emp_id,
+                        erp_valid=False,
+                        text_data_pulled=False,
+                        docs_info=docs_info,
+                        missing_docs=missing_required_docs,
+                        mapping_file=latest_map,
+                        batch_date=batch_date_value,
+                        final_status="PENDING",
+                        pull_status="PENDING",
+                        db_overall_status="PENDING",
+                        db_pull_status="PENDING",
+                        db_text_done=0,
+                        db_file_done=0,
+                        db_erp_done=0,
+                        id_text_data="No",
+                        comments="ERP ID not yet generated",
+                        db_comments="ERP ID not yet generated"
+                    )
                     stats["pending"] += 1
                     pull_data.append({
                         "CandidateID": emp_id,
@@ -275,16 +306,36 @@ def ERP_to_PS_Pull(db_conn=None):
                     })
                     continue
 
-                # Fetch files from ERP
                 url = f"{ERP_URL}?employee_ids={emp_numeric}"
                 headers = {'auth': AUTH_TOKEN}
-                res = requests.get(url, headers=headers, timeout=30)
-                if res.status_code != 200:
-                    raise Exception(f"API call failed: {res.status_code}")
-                files = res.json().get("data", {}).get(str(emp_numeric), {}).get("files", {})
+                response = requests.get(url, headers=headers, timeout=30)
+                if response.status_code != 200:
+                    raise Exception(f"API call failed: {response.status_code}")
+
+                files = response.json().get("data", {}).get(str(emp_numeric), {}).get("files", {})
                 if not files:
                     logging.info(f"[SKIP] No files found for ERP ID {emp_id}")
                     update_pull_status(emp_id, "SKIPPED", "No files found", db_conn=db_conn)
+                    update_pull_tracking(
+                        candidate_id=emp_id,
+                        employee_code=emp_id,
+                        erp_valid=True,
+                        text_data_pulled=False,
+                        docs_info=docs_info,
+                        missing_docs=missing_required_docs,
+                        mapping_file=latest_map,
+                        batch_date=batch_date_value,
+                        final_status="SKIPPED",
+                        pull_status="SKIPPED",
+                        db_overall_status="PENDING",
+                        db_pull_status="SKIPPED",
+                        db_text_done=0,
+                        db_file_done=0,
+                        db_erp_done=0,
+                        id_text_data="No",
+                        comments="No files found",
+                        db_comments="No files found"
+                    )
                     stats["skipped"] += 1
                     pull_data.append({
                         "CandidateID": emp_id,
@@ -294,52 +345,81 @@ def ERP_to_PS_Pull(db_conn=None):
                     })
                     continue
 
-                # Process and save files
+                all_candidate_meta = []
+                emp_folder = f"{DOC_DIR}/{emp_id}"
+                try:
+                    sftp.stat(emp_folder)
+                except IOError:
+                    sftp.mkdir(emp_folder)
+
                 for file_label, file_url in files.items():
                     if file_label not in erp_to_ps_required:
-                        stats["skipped"] += 1
+                        continue
+                    if file_label in docs_info:
+                        logging.info(f"[SKIP] {emp_id} | {file_label} already completed. Skipping one-time document reprocessing.")
                         continue
 
-                    f_name = file_label.split('-')[-1]
-                    if '.' not in f_name:
-                        f_name += ".pdf"
+                    file_name = file_label.split('-')[-1]
+                    if '.' not in file_name:
+                        file_name += ".pdf"
+
+                    if not is_format_valid(file_name):
+                        logging.warning(f"[SKIP] Invalid file format/size for {emp_id} | {file_label}")
+                        continue
 
                     doc_type = filelabel_to_doctype.get(file_label, "UNKNOWN")
-                    final_filename = f"{emp_id}_{doc_type}_{f_name}"
-                    emp_folder = f"{DOC_DIR}/{emp_id}"
-                    try:
-                        sftp.stat(emp_folder)  # check if folder exists
-                    except IOError:
-                        sftp.mkdir(emp_folder) 
+                    final_filename = f"{emp_id}_{doc_type}_{file_name}"
 
-                    doc_res = requests.get(file_url, timeout=30)
-                    doc_res.raise_for_status()
-                    if not is_format_valid(f_name):
-                        raise Exception("Invalid file format/size")
+                    doc_response = requests.get(file_url, timeout=30)
+                    doc_response.raise_for_status()
+                    with sftp.open(f"{emp_folder}/{final_filename}", "wb") as out_file:
+                        out_file.write(doc_response.content)
 
-                    with sftp.open(f"{emp_folder}/{final_filename}", "wb") as out_f:
-                        out_f.write(doc_res.content)
+                    docs_info[file_label] = {
+                        "filename": final_filename,
+                        "path": f"{emp_folder}/{final_filename}",
+                        "url": file_url
+                    }
+                    all_candidate_meta.append(f"{emp_id}|{emp_folder}|{final_filename}|{doc_type}")
 
-                    candidate_meta.append(f"{emp_id}|{emp_folder}|{final_filename}|{doc_type}")
-
-                # Save metadata CSV
-                if candidate_meta:
+                if all_candidate_meta:
                     meta_filename = f"{INPUT_DIR}/Meta_{emp_id}.csv"
-                    with sftp.open(meta_filename, "w") as m_f:
-                        m_f.write("EmployeeCode|Path|Filename|DocCode\n")
-                        m_f.write("\n".join(candidate_meta))
+                    with sftp.open(meta_filename, "w") as meta_file:
+                        meta_file.write("EmployeeCode|Path|Filename|DocCode\n")
+                        meta_file.write("\n".join(all_candidate_meta))
 
+                missing_required_docs = [label for label in erp_to_ps_required.keys() if label not in docs_info]
                 update_pull_status(emp_id, "SUCCESS", None, db_conn=db_conn)
+                update_pull_tracking(
+                    candidate_id=emp_id,
+                    employee_code=emp_id,
+                    erp_valid=True,
+                    text_data_pulled=False,
+                    docs_info=docs_info,
+                    missing_docs=missing_required_docs,
+                    mapping_file=latest_map,
+                    batch_date=batch_date_value,
+                    final_status="SUCCESS",
+                    pull_status="SUCCESS",
+                    db_overall_status="PENDING",
+                    db_pull_status="SUCCESS",
+                    db_text_done=0,
+                    db_file_done=1 if docs_info else 0,
+                    db_erp_done=0,
+                    id_text_data="No",
+                    comments="Files synced successfully",
+                    db_comments="Files synced successfully"
+                )
                 stats["success"] += 1
                 pull_data.append({
                     "CandidateID": emp_id,
                     "Pull Status": "SUCCESS",
                     "BOT Comments": "Files synced successfully",
-                    "Data Extracted (files)": ", ".join([f.split('|')[2] for f in candidate_meta])
+                    "Data Extracted (files)": ", ".join([meta.split('|')[2] for meta in all_candidate_meta])
                 })
 
             except Exception as e:
-                logging.error(f"[ERROR] Unexpected error processing ERP ID {emp_id}: {e}")
+                logging.error(f"[ERROR] Failed to process ERP ID {emp_id}: {e}")
                 update_pull_status(emp_id, "FAILED", str(e), db_conn=db_conn)
                 stats["failed"] += 1
                 pull_data.append({
@@ -350,54 +430,52 @@ def ERP_to_PS_Pull(db_conn=None):
                 })
 
     except Exception as e:
-        logging.critical(f"[CRITICAL] System error: {e}")
-        logging.error(traceback.format_exc())
-
+        logging.error(f"[FATAL] ERP pull job failed: {e}")
     finally:
+        if sftp:
+            sftp.close()
         if ssh:
-            try:
-                sftp.close()
-                ssh.close()
-            except Exception as e:
-                logging.error(f"[FINAL] Failed to close SFTP connection: {e}")
+            ssh.close()
 
-        # ------------------- Phase 6: Summary & Emails -------------------
-        logging.info("="*80)
-        logging.info(f"BATCH SUMMARY → Total: {stats['total']} | Success: {stats['success']} | Pending: {stats['pending']} | Skipped: {stats['skipped']} | Failed: {stats['failed']}")
-        logging.info(f"Detailed pull info: {pull_data}")
-        print(f"\nBATCH SUMMARY → Total: {stats['total']} | Success: {stats['success']} | Pending: {stats['pending']} | Skipped: {stats['skipped']} | Failed: {stats['failed']}\n")
-        logging.info("="*80)
+    logging.info("=" * 80)
+    logging.info(
+        f"BATCH SUMMARY → Total: {stats['total']} | Success: {stats['success']} | "
+        f"Pending: {stats['pending']} | Skipped: {stats['skipped']} | Failed: {stats['failed']}"
+    )
+    logging.info(f"Detailed pull info: {pull_data}")
 
-        # Send email notifications
-        if stats["success"] > 0:
-            send_pull_summary_email(pull_data)
-        elif stats["pending"] > 0 or stats["failed"] > 0 or stats["skipped"] > 0:
-            non_success_entries = [entry for entry in pull_data if entry["Pull Status"] != "SUCCESS"]
-            rows = ""
-            for i, entry in enumerate(non_success_entries, start=1):
-                rows += f"<tr><td>{i}</td><td>{entry['CandidateID']}</td><td>{entry['Pull Status']}</td><td>{entry['BOT Comments']}</td></tr>"
-
-            html_body = f"""
-            <html>
-            <body style="font-family:Calibri, sans-serif; font-size:14px;">
-                <p>Dear Team,</p>
-                <p>The following ERP IDs could not be successfully processed and will be reviewed in the next run. Once generated in ERP, the process will automatically resume:</p>
-                <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse; width:60%;">
-                    <tr style="background-color:#d9e1f2;">
-                        <th>S.No</th>
-                        <th>ERP ID</th>
-                        <th>Status</th>
-                        <th>Comments</th>
-                    </tr>
-                    {rows}
-                </table>
-                <p>Regards,<br><b>RPA BOT</b></p>
-            </body>
-            </html>
-            """
-            send_smtp_email(
-                subject=f"ERP to PeopleStrong Pull Pending | {datetime.now().strftime('%d-%m-%Y')}",
-                html_body=html_body
+    if stats["success"] > 0:
+        send_pull_summary_email(pull_data)
+    elif stats["pending"] > 0 or stats["failed"] > 0 or stats["skipped"] > 0:
+        non_success_entries = [entry for entry in pull_data if entry["Pull Status"] != "SUCCESS"]
+        rows = ""
+        for index, entry in enumerate(non_success_entries, start=1):
+            rows += (
+                f"<tr><td>{index}</td><td>{entry['CandidateID']}</td>"
+                f"<td>{entry['Pull Status']}</td><td>{entry['BOT Comments']}</td></tr>"
             )
 
-        logging.info("===== ERP → PEOPLESTRONG PULL COMPLETE =====")
+        html_body = f"""
+        <html>
+        <body style="font-family:Calibri, sans-serif; font-size:14px;">
+            <p>Dear Team,</p>
+            <p>The following ERP IDs could not be successfully processed and will be reviewed in the next run. Once generated in ERP, the process will automatically resume:</p>
+            <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse; width:60%;">
+                <tr style="background-color:#d9e1f2;">
+                    <th>S.No</th>
+                    <th>ERP ID</th>
+                    <th>Status</th>
+                    <th>Comments</th>
+                </tr>
+                {rows}
+            </table>
+            <p>Regards,<br><b>RPA BOT</b></p>
+        </body>
+        </html>
+        """
+        send_smtp_email(
+            subject=f"ERP to PeopleStrong Pull Pending | {datetime.now().strftime('%d-%m-%Y')}",
+            html_body=html_body
+        )
+
+    logging.info("===== ERP → PEOPLESTRONG PULL COMPLETE =====")

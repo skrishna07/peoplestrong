@@ -10,11 +10,23 @@ from api_handler.Ps_to_Erp_Requestor import send_to_erp,is_erp_id_valid
 from modules.Document_Base64_Generator import get_candidate_document_links
 from modules.ERP_Builder import *
 
+def _has_payload_data(value):
+    if value is None:
+        return False
+    if isinstance(value, pd.DataFrame):
+        return not value.empty
+    if isinstance(value, (dict, list, tuple, set, str)):
+        return len(value) > 0
+    try:
+        return bool(value)
+    except Exception:
+        return False
 
 
 
 
-def rebuild_payload_from_batch(sftp, batch_date, source_files, candidate_id):
+
+def rebuild_payload_from_batch(sftp, batch_date, source_files, candidate_id, build_text=True, build_files=True):
     """
     Rebuilds text & file payloads for ONE candidate using batch CSV files.
     Applies same normalization logic as build_master_dataframe().
@@ -63,84 +75,87 @@ def rebuild_payload_from_batch(sftp, batch_date, source_files, candidate_id):
         if prefix:
             dfs[prefix] = df
 
-    # ---------------- BASE TABLE ----------------
-    master = dfs.get("CandidateData")
-    if master is None or master.empty:
-        logging.error(f"[ERROR] No CandidateData found for {candidate_id}")
-        return pd.DataFrame(), pd.DataFrame()
+    text_payload = pd.DataFrame()
+    if build_text:
+        # ---------------- BASE TABLE ----------------
+        master = dfs.get("CandidateData")
+        if master is None or master.empty:
+            logging.error(f"[ERROR] No CandidateData found for {candidate_id}")
+            return pd.DataFrame(), {}
 
-    # ---------------- EDUCATION ----------------
-    edu_df = dfs.get("CandidateEducation")
-    if edu_df is not None and not edu_df.empty:
-        edu_df = normalize_education(edu_df)
-        master = master.merge(edu_df, on=JOIN_KEY, how="left")
+        # ---------------- EDUCATION ----------------
+        edu_df = dfs.get("CandidateEducation")
+        if edu_df is not None and not edu_df.empty:
+            edu_df = normalize_education(edu_df)
+            master = master.merge(edu_df, on=JOIN_KEY, how="left")
 
-    # ---------------- EMERGENCY CONTACT ----------------
-    emergency_df = dfs.get("CandidateEmergencyContact")
-    if emergency_df is not None and not emergency_df.empty:
-        master = master.merge(emergency_df, on=JOIN_KEY, how="left")
+        # ---------------- EMERGENCY CONTACT ----------------
+        emergency_df = dfs.get("CandidateEmergencyContact")
+        if emergency_df is not None and not emergency_df.empty:
+            master = master.merge(emergency_df, on=JOIN_KEY, how="left")
 
-    # ---------------- ID DETAILS ----------------
-    id_df = dfs.get("CandidateIDDetails")
-    if id_df is not None and not id_df.empty:
-        id_df = normalize_id(id_df)
+        # ---------------- ID DETAILS ----------------
+        id_df = dfs.get("CandidateIDDetails")
+        if id_df is not None and not id_df.empty:
+            id_df = normalize_id(id_df)
 
-        # Select main ID
-        id_main_df = (
-            id_df.groupby(JOIN_KEY, group_keys=False)
-            .apply(lambda grp: select_id_type(grp, grp.name))
-            .reset_index(drop=False)
-        )
+            # Select main ID
+            id_main_df = (
+                id_df.groupby(JOIN_KEY, group_keys=False)
+                .apply(lambda grp: select_id_type(grp, grp.name))
+                .reset_index(drop=False)
+            )
 
-        master = master.merge(id_main_df, on=JOIN_KEY, how="left")
+            master = master.merge(id_main_df, on=JOIN_KEY, how="left")
 
-    # ---------------- SALARY ----------------
-    sal_df = dfs.get("CandidateSalaryData")
-    if sal_df is not None and not sal_df.empty:
-        sal_df = normalize_salary(sal_df)
-        master = master.merge(sal_df, on=JOIN_KEY, how="left")
+        # ---------------- SALARY ----------------
+        sal_df = dfs.get("CandidateSalaryData")
+        if sal_df is not None and not sal_df.empty:
+            sal_df = normalize_salary(sal_df)
+            master = master.merge(sal_df, on=JOIN_KEY, how="left")
 
-    # ---------------- PRIMARY ADDRESS ----------------
-    contact_df = dfs.get("CandidateContact")
-    if contact_df is not None and not contact_df.empty:
-        primary_address = select_primary_address(contact_df, candidate_id)
+        # ---------------- PRIMARY ADDRESS ----------------
+        contact_df = dfs.get("CandidateContact")
+        if contact_df is not None and not contact_df.empty:
+            primary_address = select_primary_address(contact_df, candidate_id)
 
-        if primary_address is not None:
-            primary_address_df = pd.DataFrame([primary_address])
-            master = master.merge(primary_address_df, on=JOIN_KEY, how="left")
+            if primary_address is not None:
+                primary_address_df = pd.DataFrame([primary_address])
+                master = master.merge(primary_address_df, on=JOIN_KEY, how="left")
 
-    # ---------------- REMOVE DUPLICATES ----------------
-    master = master.drop_duplicates(subset=[JOIN_KEY])
+        # ---------------- REMOVE DUPLICATES ----------------
+        master = master.drop_duplicates(subset=[JOIN_KEY])
 
-    try:
-        text_payload = master
-        text_payload = text_payload.replace({pd.NaT: None})
-        text_payload = text_payload.where(pd.notnull(text_payload), None)
-    except Exception as e:
-        print("Text payload error as ",e)
+        try:
+            text_payload = master
+            text_payload = text_payload.replace({pd.NaT: None})
+            text_payload = text_payload.where(pd.notnull(text_payload), None)
+        except Exception as e:
+            print("Text payload error as ",e)
 
     # ---------------- FILE PAYLOAD ----------------
     try:
-        file_payload = get_candidate_document_links(candidate_id)
+        file_payload = get_candidate_document_links(candidate_id) if build_files else {}
     except Exception:
         file_payload = {}
 
     # ---------------- WRITE DEBUG FILE ----------------
-    output_path = f"debug_text_payload_{candidate_id}.txt"
+    if build_text:
+        output_path = f"debug_text_payload_{candidate_id}.txt"
 
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write(f"Text Payload for Candidate: {candidate_id}\n")
-        f.write("=" * 80 + "\n\n")
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(f"Text Payload for Candidate: {candidate_id}\n")
+            f.write("=" * 80 + "\n\n")
+
+            if text_payload is not None and not text_payload.empty:
+                f.write(text_payload.to_string(index=False))
+            else:
+                f.write("No data found.\n")
+
+        print(f"[DEBUG] Text payload written to {output_path}")
 
         if text_payload is not None and not text_payload.empty:
-            f.write(text_payload.to_string(index=False))
-        else:
-            f.write("No data found.\n")
-
-    print(f"[DEBUG] Text payload written to {output_path}")
-
-    if text_payload is not None and not text_payload.empty:
-        print_peoplestrong_snapshot(text_payload.iloc[0])
+            print_peoplestrong_snapshot(text_payload.iloc[0])
 
     return text_payload, file_payload
 
@@ -170,9 +185,10 @@ def fetch_pending_candidates(db_conn=None):
                    source_file,
                    mapping_file
             FROM pending_sync
-            WHERE IFNULL(erp_done, 0) = 0
+            WHERE (IFNULL(erp_done, 0) = 0
                OR IFNULL(text_done, 0) = 0
-               OR IFNULL(file_done, 0) = 0
+               OR IFNULL(file_done, 0) = 0)
+            AND overall_status != 'Dropped'
             ORDER BY created_at ASC
         """)
 
@@ -187,7 +203,42 @@ def fetch_pending_candidates(db_conn=None):
         logging.error(f"[DB] Failed to fetch pending candidates: {e}")
         return []
 
-def Push_Pending(db_conn=None):
+
+_erp_validation_cache = {}
+
+def batch_validate_erp_ids(erpid_list):
+    """Validate multiple ERP IDs in parallel. Cache results locally to avoid re-checking."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    results = {}
+    to_check = [eid for eid in erpid_list if eid not in _erp_validation_cache]
+    
+    if not to_check:
+        return {eid: _erp_validation_cache[eid] for eid in erpid_list}
+    
+    def _check(eid):
+        try:
+            valid = is_erp_id_valid(eid)
+            _erp_validation_cache[eid] = valid
+            return eid, valid
+        except Exception as e:
+            logging.warning(f"[ERP CACHE] Validation error for {eid}: {e}")
+            _erp_validation_cache[eid] = False
+            return eid, False
+    
+    with ThreadPoolExecutor(max_workers=5) as executor:
+        futures = {executor.submit(_check, eid): eid for eid in to_check}
+        for future in as_completed(futures):
+            try:
+                eid, valid = future.result(timeout=30)
+                results[eid] = valid
+            except Exception as e:
+                eid = futures[future]
+                logging.error(f"[ERP CACHE] Timeout/error for {eid}: {e}")
+                results[eid] = False
+    
+    return {**{eid: _erp_validation_cache[eid] for eid in erpid_list if eid in _erp_validation_cache}, **results}
+
+def Push_Pending(db_conn=None, max_ids=None):
     logging.info("========== PENDING PUSH START ==========")
 
     # -------------------- DB Initialization --------------------
@@ -204,7 +255,18 @@ def Push_Pending(db_conn=None):
         logging.info("[INFO] No pending candidates found.")
         return
 
+    if isinstance(max_ids, int) and max_ids > 0:
+        pending_candidates = pending_candidates[:max_ids]
+        logging.info(f"[LIMIT] Pending processing limited to first {len(pending_candidates)} candidate(s).")
+
     logging.info(f"[INFO] Found {len(pending_candidates)} pending candidates.")
+    
+    # -------------------- Batch ERP Validation (Parallel) --------------------
+    erpid_list = [c[1] for c in pending_candidates if c[1]]
+    logging.info(f"[INFO] Pre-validating {len(erpid_list)} ERP IDs in parallel...")
+    erp_validation_map = batch_validate_erp_ids(erpid_list)
+    logging.info(f"[INFO] ERP validation complete. Cached {len(_erp_validation_cache)} results.")
+    
     push_data = []
 
     # -------------------- Process Each Candidate --------------------
@@ -217,10 +279,10 @@ def Push_Pending(db_conn=None):
             logging.info("-" * 60)
             logging.info(f"[PROCESSING] Candidate: {cid} | ERP ID: {erpid_db} | Status: {overall_status}")
 
-            # -------------------- ERP ID Validation --------------------
-            erpid_valid = erpid_db and is_erp_id_valid(erpid_db)
+            # -------------------- ERP ID Validation (from cache) --------------------
+            erpid_valid = erpid_db and erp_validation_map.get(erpid_db, False)
             if not erpid_valid:
-                logging.warning(f"[WARN] Candidate {cid} ERP ID missing or invalid")
+                logging.warning(f"[WARN] Candidate {cid} ERP ID missing or invalid (cached)")
                 save_to_queue(candidate_id=cid, erpid=erpid_db or "N/A",
                               overall_status=STATUS_PENDING,
                               comments="ERP ID missing or invalid — waiting",
@@ -237,6 +299,13 @@ def Push_Pending(db_conn=None):
             text_payload, file_payload = None, None
             text_payload_dict = None
 
+            if text_payload_db and text_done == 1:
+                try:
+                    text_payload_dict = json.loads(text_payload_db)
+                    text_payload = pd.DataFrame([text_payload_dict])
+                except Exception as parse_err:
+                    logging.warning(f"[WARN] Candidate {cid} stored payload parse error: {parse_err}")
+
             if batch_date and source_file:
                 try:
                     source_files = json.loads(source_file)
@@ -244,31 +313,45 @@ def Push_Pending(db_conn=None):
                     source_files = []
 
                 if source_files:
-                    ssh, sftp = get_sftp_connection()
-                    try:
-                        text_payload, file_payload = rebuild_payload_from_batch(
-                            sftp=sftp,
-                            batch_date=batch_date,
-                            source_files=source_files,
-                            candidate_id=cid
-                        )
-                    finally:
-                        sftp.close()
-                        ssh.close()
+                    build_text = not text_done
+                    build_files = not file_done
+
+                    if build_text or build_files:
+                        ssh, sftp = get_sftp_connection()
+                        try:
+                            rebuilt_text_payload, rebuilt_file_payload = rebuild_payload_from_batch(
+                                sftp=sftp,
+                                batch_date=batch_date,
+                                source_files=source_files,
+                                candidate_id=cid,
+                                build_text=build_text,
+                                build_files=build_files
+                            )
+                        finally:
+                            sftp.close()
+                            ssh.close()
+
+                        if build_text:
+                            text_payload = rebuilt_text_payload
+                        if build_files:
+                            file_payload = rebuilt_file_payload
+
+                    elif overall_status == "TEXT_SENT" and erp_done == 0:
+                        file_payload = get_candidate_document_links(cid)
 
                     # Convert DataFrame to dict
                     if text_payload is not None and not text_payload.empty:
                         text_payload_dict = text_payload.iloc[0].to_dict()
 
-                    text_done = 1 if text_payload_dict else 0
-                    file_done = 1 if file_payload else 0
+                    text_done = 1 if text_done or _has_payload_data(text_payload_dict) else 0
+                    file_done = 1 if file_done or _has_payload_data(file_payload) else 0
 
                     save_to_queue(
                         candidate_id=cid,
                         erpid=erpid_db,
                         text_payload=json.dumps(text_payload_dict) if text_payload_dict else None,
-                        text_done=text_done,
-                        file_done=file_done,
+                        text_done=text_done if _has_payload_data(text_payload_dict) else None,
+                        file_done=file_done if _has_payload_data(file_payload) else None,
                         overall_status=STATUS_PENDING if erp_done == 0 else STATUS_SUCCESS,
                         db_conn=db_conn
                     )
@@ -279,8 +362,30 @@ def Push_Pending(db_conn=None):
                     logging.warning(f"[WARN] Candidate {cid} has no valid source files")
                     continue
             else:
-                logging.warning(f"[WARN] Candidate {cid} missing batch_date or source_file")
-                continue
+                # No batch source info — try to recover from stored text_payload in DB
+                if text_payload_db and text_done == 1:
+                    logging.info(f"[RECOVERY] Candidate {cid} has no batch_date/source_file — using stored text_payload from DB.")
+                    try:
+                        text_payload_dict = json.loads(text_payload_db)
+                        text_payload = pd.DataFrame([text_payload_dict])
+                        if overall_status == "TEXT_SENT" and erp_done == 0:
+                            file_payload = get_candidate_document_links(cid)
+                        else:
+                            file_payload = {}
+                    except Exception as parse_err:
+                        logging.warning(f"[WARN] Candidate {cid} stored payload parse error: {parse_err}")
+                        push_data.append({
+                            "CandidateID": cid, "ERPID": erpid_db,
+                            "status": STATUS_PENDING, "comments": "Stored payload parse error"
+                        })
+                        continue
+                else:
+                    logging.warning(f"[WARN] Candidate {cid} missing batch_date/source_file and no stored payload — skipping for now.")
+                    push_data.append({
+                        "CandidateID": cid, "ERPID": erpid_db,
+                        "status": STATUS_PENDING, "comments": "Missing batch_date/source_file — awaiting next batch"
+                    })
+                    continue
 
             # -------------------- ERP Push --------------------
 

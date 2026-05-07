@@ -125,10 +125,13 @@ def send_push_summary_email(push_data):
         
         rows = ""
         for r in data:
-            rows += f"<tr><td>{r.get('ERPID','')}</td><td>{r.get('status','')}</td><td>{r.get('comments','')}</td></tr>"
+            status = str(r.get('status', '')).upper()
+            row_class = "success" if status == "SUCCESS" else "failed" if status == "FAILED" else ""
+            class_attr = f' class="{row_class}"' if row_class else ""
+            rows += f"<tr{class_attr}><td>{r.get('ERPID','')}</td><td>{r.get('status','')}</td><td>{r.get('comments','')}</td></tr>"
             
         return f"""
-        <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse; font-family:Calibri; font-size:13px;">
+        <table>
             <tr style="background-color:#d9e1f2;">
                 <th>Candidate ID</th>
                 <th>Push Status</th>
@@ -139,15 +142,61 @@ def send_push_summary_email(push_data):
         """
 
     push_table = build_html_table(push_data)
+    total = len(push_data)
+    success_count = sum(1 for row in push_data if str(row.get('status', '')).upper() == "SUCCESS")
+    failed_count = sum(1 for row in push_data if str(row.get('status', '')).upper() == "FAILED")
     subject = f"PeopleStrong to ERP Automation Summary | {datetime.now().strftime('%d-%m-%Y')}"
     
     body = f"""
+    <!DOCTYPE html>
     <html>
+    <head>
+        <style>
+            body {{
+                font-family: Calibri, sans-serif;
+                font-size: 14px;
+                color: #333;
+            }}
+            table {{
+                border-collapse: collapse;
+                font-family: Calibri;
+                font-size: 13px;
+                width: 90%;
+                margin: 20px 0;
+            }}
+            table, th, td {{
+                border: 1px solid #000;
+            }}
+            th {{
+                background-color: #d9e1f2;
+                padding: 6px;
+                text-align: left;
+            }}
+            td {{
+                padding: 6px;
+            }}
+            h3 {{
+                color: #000;
+            }}
+            .success {{
+                background-color: #e2efda;
+            }}
+            .failed {{
+                background-color: #f4cccc;
+            }}
+        </style>
+    </head>
     <body>
         <p>Dear Team,</p>
         <p>BOT successfully completed the run, please find the summary below.</p>
         <h3>Incremental Candidate Push – PeopleStrong to ERP</h3>
         {push_table}
+        <p><b>Summary:</b></p>
+        <ul>
+            <li>Total Candidates: {total}</li>
+            <li>Successful: {success_count}</li>
+            <li>Failed: {failed_count}</li>
+        </ul>
         <p>Regards,<br><b>RPA BOT</b></p>
     </body>
     </html>
