@@ -22,7 +22,7 @@ def send_smtp_email(subject, html_body):
         # msg['To'] = 'sridhar.s@bradsol.com'
         # msg['Subject'] = subject
         msg['Subject'] = Header(subject, 'utf-8') 
-        msg.attach(MIMEText(html_body, 'html'))
+        msg.attach(MIMEText(html_body, 'html', 'utf-8'))
 
         log_event(f"Attempting to send SMTP email: {subject}")
         
@@ -145,6 +145,7 @@ def send_push_summary_email(push_data):
     total = len(push_data)
     success_count = sum(1 for row in push_data if str(row.get('status', '')).upper() == "SUCCESS")
     failed_count = sum(1 for row in push_data if str(row.get('status', '')).upper() == "FAILED")
+    pending_count = total - success_count - failed_count
     subject = f"PeopleStrong to ERP Automation Summary | {datetime.now().strftime('%d-%m-%Y')}"
     
     body = f"""
@@ -196,17 +197,21 @@ def send_push_summary_email(push_data):
             <li>Total Candidates: {total}</li>
             <li>Successful: {success_count}</li>
             <li>Failed: {failed_count}</li>
+            <li>Pending: {pending_count}</li>
         </ul>
         <p>Regards,<br><b>RPA BOT</b></p>
     </body>
     </html>
     """
-    
+
     # Execute Send
-    if send_smtp_email(subject, body):
-        print(f"INFO: {subject} triggered successfully.")
-    else:
-        print(f"ERROR: Failed to send {subject}.")
+    try:
+        if send_smtp_email(subject, body):
+            print(f"INFO: {subject} triggered successfully.")
+        else:
+            print(f"ERROR: Failed to send {subject}.")
+    except Exception as e:
+        print(f"ERROR: Exception occurred while sending email: {e}")
 
 
 
@@ -277,7 +282,6 @@ def send_pull_summary_email(pull_data, subject=None):
         <p>BOT successfully completed the ERP → PeopleStrong pull.</p>
         <h3>ERP to PeopleStrong Pull Candidate Data (Aggregated)</h3>
         {pull_table}
-        <p>Full file-level details attached as CSV.</p>
         <p>Regards,<br><b>RPA BOT</b></p>
     </body>
     </html>

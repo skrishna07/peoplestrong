@@ -1,0 +1,16 @@
+[2026-05-08 10:29:24] INFO:  Attempting to send SMTP email: ERP to PeopleStrong Pull | No Candidates | 08-05-2026
+[2026-05-08 10:29:29] INFO:  SUCCESS: Email 'ERP to PeopleStrong Pull | No Candidates | 08-05-2026' sent via SMTP.
+[2026-05-14 12:03:49] INFO:  Attempting to send SMTP email: PeopleStrong to ERP Alert | No Matching Data | 14-05-2026
+[2026-05-14 12:03:54] INFO:  SUCCESS: Email 'PeopleStrong to ERP Alert | No Matching Data | 14-05-2026' sent via SMTP.
+[2026-05-14 12:29:57] INFO:  Attempting to send SMTP email: ERP to PeopleStrong Pull | No Candidates | 14-05-2026
+[2026-05-14 12:30:02] INFO:  SUCCESS: Email 'ERP to PeopleStrong Pull | No Candidates | 14-05-2026' sent via SMTP.
+[2026-05-14 12:35:28] INFO:  Attempting to send SMTP email: ERP to PeopleStrong Pull Pending | 14-05-2026
+[2026-05-14 12:35:32] INFO:  SUCCESS: Email 'ERP to PeopleStrong Pull Pending | 14-05-2026' sent via SMTP.
+[2026-05-14 14:09:11] INFO:  Attempting to send SMTP email: ERP to PeopleStrong Pull Summary | 14-05-2026
+[2026-05-14 14:09:15] INFO:  SUCCESS: Email 'ERP to PeopleStrong Pull Summary | 14-05-2026' sent via SMTP.
+[2026-05-14 15:27:52] INFO:  Attempting to send SMTP email: ERP to PeopleStrong Pull Summary | 14-05-2026
+[2026-05-14 15:27:56] INFO:  SUCCESS: Email 'ERP to PeopleStrong Pull Summary | 14-05-2026' sent via SMTP.
+[2026-05-19 12:58:43] INFO:  Attempting to send SMTP email: ERP to PeopleStrong Pull Summary | 19-05-2026
+[2026-05-19 12:58:48] INFO:  SUCCESS: Email 'ERP to PeopleStrong Pull Summary | 19-05-2026' sent via SMTP.
+[2026-05-19 13:40:39] INFO:  Attempting to send SMTP email: ERP to PeopleStrong Pull Pending | 19-05-2026
+[2026-05-19 13:40:45] INFO:  SUCCESS: Email 'ERP to PeopleStrong Pull Pending | 19-05-2026' sent via SMTP.

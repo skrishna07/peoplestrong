@@ -113,13 +113,41 @@ def PS_to_ERP_Push(db_conn=None, max_ids=None):
 
     # ------------------- Phase 3: Load CSVs -------------------
     logging.info("[PHASE 3] Loading CSVs...")
+
+    # Reconnect SFTP in case the connection dropped during Push_Pending
+    try:
+        sftp.stat(".")
+    except Exception:
+        logging.warning("[SFTP] Connection lost before Phase 3. Reconnecting...")
+        try:
+            ssh.close()
+        except Exception:
+            pass
+        try:
+            ssh, sftp = get_sftp_connection()
+            logging.info("[SFTP] Reconnected successfully for Phase 3.")
+        except Exception as reconnect_err:
+            logging.error("[SFTP] Reconnect failed: %s", str(reconnect_err))
+            send_smtp_email(
+                subject="PeopleStrong → ERP | SFTP Reconnect Failed",
+                html_body=f"<p>SFTP reconnection failed before CSV loading. Error: <b>{reconnect_err}</b></p><p>Regards,<br><b>RPA BOT</b></p>"
+            )
+            return
+
     try:
         dfs, batch_date, mapping_file, source_file = load_csvs(sftp)
         source_lookup = getattr(load_csvs, "source_lookup", {})
         mapping_df = dfs.get("Mapping")
     except Exception as e:
         logging.error("[CSV] Failed to load CSVs: %s", str(e))
-        ssh.close()
+        send_smtp_email(
+            subject="PeopleStrong → ERP | CSV Load Failed",
+            html_body=f"<p>The automation failed to load CSVs from SFTP.</p><p>Error: <b>{e}</b></p><p>Please check the SFTP server and retry.</p><p>Regards,<br><b>RPA BOT</b></p>"
+        )
+        try:
+            ssh.close()
+        except Exception:
+            pass
         return
 
     # ------------------- Phase 4: Validate Mapping -------------------

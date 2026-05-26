@@ -173,6 +173,7 @@ erp_to_ps_required = {
     "EmiratesID-copy": "Post_Joining–Typed_Emirates_Copy",
     "ResidenceVisaProcess-visastampreceipt": "Post_Joining–Stamped_Visa"
     
+    
 }
 
 
@@ -207,7 +208,21 @@ def ERP_to_PS_Pull(db_conn=None, max_ids=None):
             logging.warning("[PHASE 3] No mapping files found. Exiting process.")
             return
 
-        latest_map = sorted(mapping_files, reverse=True)[0]
+        def _mapping_file_dt(file_name: str):
+            match = re.match(r"Mapping_(\d{8})_(\d{6})\.csv$", str(file_name).strip(), re.IGNORECASE)
+            if not match:
+                return None
+            try:
+                return datetime.strptime(f"{match.group(1)}{match.group(2)}", "%d%m%Y%H%M%S")
+            except Exception:
+                return None
+
+        parsed_mapping_files = [(f, _mapping_file_dt(f)) for f in mapping_files]
+        valid_mapping_files = [item for item in parsed_mapping_files if item[1] is not None]
+        if valid_mapping_files:
+            latest_map = max(valid_mapping_files, key=lambda x: x[1])[0]
+        else:
+            latest_map = sorted(mapping_files, reverse=True)[0]
         map_match = re.search(r"Mapping_(\d{8})_", latest_map)
         if map_match:
             batch_date_value = datetime.strptime(map_match.group(1), "%d%m%Y").date().isoformat()
@@ -220,16 +235,41 @@ def ERP_to_PS_Pull(db_conn=None, max_ids=None):
             logging.error("[PHASE 3] Mapping file missing required headers. Exiting process.")
             return
 
-        df = df[df['ERPID'].astype(str).str.startswith('PH')]
+        # Normalize ERP IDs to avoid false negatives caused by spaces/case/missing values.
+        df['ERPID'] = df['ERPID'].fillna('').astype(str).str.strip()
+        df = df[df['ERPID'].str.upper().str.startswith('PH')]
         logging.info("[PHASE 3] Mapping file loaded correctly with ERP IDs and PeopleStrong IDs")
 
         pending_rows = fetch_pull_pending_candidates(db_conn)
+        pending_targets = []
         if pending_rows:
             logging.info("[PHASE 4] Resuming pending ERP IDs")
-            targets = [row[1] for row in pending_rows if row[1] and row[1] != 'N/A']
-        else:
-            targets = df['ERPID'].dropna().astype(str).tolist()
-            targets = [target_id for target_id in targets if target_id.strip() and target_id != 'N/A']
+            pending_targets = [
+                str(row[1]).strip()
+                for row in pending_rows
+                if row[1] and str(row[1]).strip() and str(row[1]).strip().upper() not in ('N/A', 'NA', 'NONE', 'NULL')
+            ]
+            logging.info("[PHASE 4] Valid pending ERP ID(s): %d", len(pending_targets))
+
+        mapping_targets = [
+            target_id.strip()
+            for target_id in df['ERPID'].dropna().astype(str).tolist()
+            if target_id.strip() and target_id.strip().upper() not in ('N/A', 'NA', 'NONE', 'NULL')
+        ]
+        logging.info("[PHASE 4] Valid mapping ERP ID(s): %d", len(mapping_targets))
+
+        # Process pending first, then include remaining IDs from latest mapping file.
+        targets = []
+        seen = set()
+        for target_list in (pending_targets, mapping_targets):
+            for target_id in target_list:
+                norm_id = target_id.upper()
+                if norm_id in seen:
+                    continue
+                seen.add(norm_id)
+                targets.append(target_id)
+
+        logging.info("[PHASE 4] Total unique ERP ID(s) to process: %d", len(targets))
 
         if isinstance(max_ids, int) and max_ids > 0:
             targets = targets[:max_ids]
@@ -419,13 +459,34 @@ def ERP_to_PS_Pull(db_conn=None, max_ids=None):
                 })
 
             except Exception as e:
-                logging.error(f"[ERROR] Failed to process ERP ID {emp_id}: {e}")
-                update_pull_status(emp_id, "FAILED", str(e), db_conn=db_conn)
+                err_str = str(e)
+                logging.error(f"[ERROR] Failed to process ERP ID {emp_id}: {err_str}")
+
+                # SFTP socket closed mid-run — reconnect and retry this ID once
+                if "socket is closed" in err_str.lower() or "ssh session not active" in err_str.lower():
+                    logging.warning("[SFTP] Socket closed during processing. Attempting reconnect...")
+                    try:
+                        try:
+                            sftp.close()
+                        except Exception:
+                            pass
+                        try:
+                            ssh.close()
+                        except Exception:
+                            pass
+                        ssh, sftp = get_sftp_connection()
+                        logging.info("[SFTP] Reconnected. Retrying ERP ID %s", emp_id)
+                        # Re-raise so the outer loop naturally retries on next run
+                        # (don't retry inline to avoid silent double-processing)
+                    except Exception as reconnect_err:
+                        logging.error("[SFTP] Reconnect failed: %s", reconnect_err)
+
+                update_pull_status(emp_id, "FAILED", err_str, db_conn=db_conn)
                 stats["failed"] += 1
                 pull_data.append({
                     "CandidateID": emp_id,
                     "Pull Status": "FAILED",
-                    "BOT Comments": str(e),
+                    "BOT Comments": err_str,
                     "Data Extracted (files)": ""
                 })
 

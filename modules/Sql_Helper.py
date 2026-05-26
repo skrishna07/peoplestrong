@@ -64,6 +64,14 @@ def init_db(db_conn=None):
             c.execute("ALTER TABLE pending_sync ADD COLUMN drop_reason TEXT")
         except sqlite3.OperationalError:
             pass  # Column already exists
+        try:
+            c.execute("ALTER TABLE pending_sync ADD COLUMN pull_retry_count INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        try:
+            c.execute("ALTER TABLE pending_sync ADD COLUMN pull_retry_count INTEGER DEFAULT 0")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
 
         db_conn.commit()
         if own_conn:
@@ -89,8 +97,8 @@ def _empty_to_none(value):
     return val if val else None
 
 
-def sync_queue_from_csv(db_conn=None, csv_path=CSV_FILE):
-    """Backfill missing pending records from CSV into SQLite queue."""
+def sync_queue_from_csv(db_conn=None, csv_path=CSV_FILE, filter_criteria=None, limit=None):
+    """Backfill missing pending records from CSV into SQLite queue with optional filtering and limiting."""
     try:
         if not os.path.exists(csv_path):
             logging.info(f"[DB SYNC] CSV not found, skipping sync: {csv_path}")
@@ -98,15 +106,31 @@ def sync_queue_from_csv(db_conn=None, csv_path=CSV_FILE):
 
         own_conn = False
         if db_conn is None:
-            db_conn = sqlite3.connect(DB_FILE)
-            own_conn = True
+            try:
+                db_conn = sqlite3.connect(DB_FILE)
+                own_conn = True
+            except sqlite3.Error as db_err:
+                logging.error(f"[DB SYNC] Failed to connect to database: {db_err}")
+                return 0
 
         cursor = db_conn.cursor()
         cursor.execute("SELECT candidate_id FROM pending_sync")
         existing_ids = {row[0] for row in cursor.fetchall() if row and row[0]}
 
-        with open(csv_path, newline='', encoding='utf-8') as f:
-            rows = list(csv.DictReader(f))
+        try:
+            with open(csv_path, newline='', encoding='utf-8') as f:
+                rows = list(csv.DictReader(f))
+        except Exception as file_err:
+            logging.error(f"[DB SYNC] Failed to read CSV file: {file_err}")
+            return 0
+
+        # Apply filtering criteria if provided
+        if filter_criteria:
+            rows = [row for row in rows if filter_criteria(row)]
+
+        # Apply limit if provided
+        if limit:
+            rows = rows[:limit]
 
         inserted = 0
         for row in rows:
@@ -114,32 +138,35 @@ def sync_queue_from_csv(db_conn=None, csv_path=CSV_FILE):
             if not candidate_id or candidate_id in existing_ids:
                 continue
 
-            cursor.execute("""
-                INSERT INTO pending_sync
-                (candidate_id, erpid, batch_date, mapping_file, source_file,
-                 text_payload, file_path, text_done, file_done, erp_done,
-                 overall_status, erp_status, erp_response,
-                 error_message, failed_phase, comments)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                candidate_id,
-                _empty_to_none(row.get("erpid")) or candidate_id,
-                _empty_to_none(row.get("batch_date")),
-                _empty_to_none(row.get("mapping_file")),
-                _empty_to_none(row.get("source_file")),
-                _empty_to_none(row.get("text_payload")),
-                _empty_to_none(row.get("file_path")),
-                _to_int_flag(row.get("text_done"), default=0),
-                _to_int_flag(row.get("file_done"), default=0),
-                _to_int_flag(row.get("erp_done"), default=0),
-                _empty_to_none(row.get("overall_status")) or "PENDING",
-                _empty_to_none(row.get("erp_status")),
-                _empty_to_none(row.get("erp_response")),
-                _empty_to_none(row.get("error_message")),
-                _empty_to_none(row.get("failed_phase")),
-                _empty_to_none(row.get("comments"))
-            ))
-            inserted += 1
+            try:
+                cursor.execute("""
+                    INSERT INTO pending_sync
+                    (candidate_id, erpid, batch_date, mapping_file, source_file,
+                     text_payload, file_path, text_done, file_done, erp_done,
+                     overall_status, erp_status, erp_response,
+                     error_message, failed_phase, comments)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    candidate_id,
+                    _empty_to_none(row.get("erpid")) or candidate_id,
+                    _empty_to_none(row.get("batch_date")),
+                    _empty_to_none(row.get("mapping_file")),
+                    _empty_to_none(row.get("source_file")),
+                    _empty_to_none(row.get("text_payload")),
+                    _empty_to_none(row.get("file_path")),
+                    _to_int_flag(row.get("text_done"), default=0),
+                    _to_int_flag(row.get("file_done"), default=0),
+                    _to_int_flag(row.get("erp_done"), default=0),
+                    _empty_to_none(row.get("overall_status")) or "PENDING",
+                    _empty_to_none(row.get("erp_status")),
+                    _empty_to_none(row.get("erp_response")),
+                    _empty_to_none(row.get("error_message")),
+                    _empty_to_none(row.get("failed_phase")),
+                    _empty_to_none(row.get("comments"))
+                ))
+                inserted += 1
+            except sqlite3.Error as insert_err:
+                logging.error(f"[DB SYNC] Failed to insert row for candidate {candidate_id}: {insert_err}")
 
         db_conn.commit()
 
@@ -150,7 +177,7 @@ def sync_queue_from_csv(db_conn=None, csv_path=CSV_FILE):
         return inserted
 
     except Exception as e:
-        logging.error(f"[DB SYNC] Failed to sync CSV to DB: {e}")
+        logging.error(f"[DB SYNC] Unexpected error during sync: {e}")
         return 0
 
 
@@ -673,17 +700,34 @@ def update_pull_status(candidate_id, status, error_msg=None, db_conn=None):
             own_conn = True
 
         cursor = db_conn.cursor()
-        cursor.execute("""
-            UPDATE pending_sync
-            SET pull_status = ?,
-                pull_Error = ?,
-                updated_at = CURRENT_TIMESTAMP
-            WHERE candidate_id = ?
-        """, (status, error_msg, candidate_id))
+        # Increment retry count only when marking back to PENDING (avoids count growing on SUCCESS/SKIPPED)
+        if status == "PENDING":
+            cursor.execute("""
+                UPDATE pending_sync
+                SET pull_status = ?,
+                    pull_Error = ?,
+                    pull_retry_count = COALESCE(pull_retry_count, 0) + 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE candidate_id = ?
+                   OR erpid = ?
+            """, (status, error_msg, candidate_id, candidate_id))
+        else:
+            cursor.execute("""
+                UPDATE pending_sync
+                SET pull_status = ?,
+                    pull_Error = ?,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE candidate_id = ?
+                   OR erpid = ?
+            """, (status, error_msg, candidate_id, candidate_id))
+        updated_rows = cursor.rowcount
         db_conn.commit()
         if own_conn:
             db_conn.close()
-        logging.info(f"[PULL] Candidate {candidate_id} pull status updated: {status}")
+        if updated_rows == 0:
+            logging.warning(f"[PULL] No pending_sync row matched for identifier {candidate_id}; status not updated.")
+        else:
+            logging.info(f"[PULL] Candidate {candidate_id} pull status updated: {status} (rows: {updated_rows})")
     except Exception as e:
         logging.error(f"[PULL] Failed to update pull status for {candidate_id}: {e}")
 
@@ -748,7 +792,12 @@ def update_csv(candidate_id, erpid, batch_date=None, mapping_file=None, source_f
 
 
 def fetch_pull_pending_candidates(db_conn=None):
-    """Fetch all candidates that have pull_status PENDING or FAILED."""
+    """Fetch candidates that still need pull processing.
+
+    Includes:
+    - explicit pull_status PENDING/FAILED
+    - legacy rows where overall_status is PENDING but pull_status is NULL/blank
+    """
     try:
         own_conn = False
         if db_conn is None:
@@ -756,11 +805,20 @@ def fetch_pull_pending_candidates(db_conn=None):
             own_conn = True
 
         c = db_conn.cursor()
+        # Skip IDs retried 15+ times with no success — they are persistently invalid
+        # and will be skipped until manually reset (set pull_retry_count = 0).
         c.execute("""
             SELECT candidate_id, erpid, batch_date, text_payload, file_path, text_done, file_done, erp_done,
                    overall_status, comments, source_file, mapping_file, pull_status, pull_Error
             FROM pending_sync
-            WHERE pull_status IN ('PENDING', 'FAILED')
+            WHERE COALESCE(pull_retry_count, 0) < 15
+              AND (
+                    pull_status IN ('PENDING', 'FAILED')
+                    OR (
+                          COALESCE(TRIM(pull_status), '') = ''
+                          AND COALESCE(UPPER(TRIM(overall_status)), '') = 'PENDING'
+                       )
+                  )
             ORDER BY created_at ASC
         """)
         rows = c.fetchall()

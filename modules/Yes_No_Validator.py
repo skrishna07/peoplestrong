@@ -233,6 +233,7 @@ def ensure_tracking_files():
     _ensure_schema(PUSH_VALIDATOR_FILE, PUSH_HEADERS)
     _sanitize_pull_tracking_file()
     _sanitize_push_tracking_file()
+    _retry_pending_candidates()
 
 
 def _candidate_from_row(row):
@@ -528,3 +529,24 @@ def update_pull_tracking(candidate_id=None, employee_code=None, erp_valid=False,
 
     _upsert_row(PULL_TRACK_FILE, PULL_HEADERS, monitor_row)
     _upsert_row(PULL_VALIDATOR_FILE, PULL_HEADERS, _to_validator_row(PULL_HEADERS, monitor_row))
+
+
+def _retry_pending_candidates():
+    """Process rows with 'PENDING' status in the pull tracking file."""
+    if not os.path.exists(PULL_TRACK_FILE):
+        return
+
+    rows = _read_rows(PULL_TRACK_FILE)
+    if not rows:
+        return
+
+    updated_rows = []
+    for row in rows:
+        if row.get("Pull Status") == "PENDING":
+            # Logic to retry the pull process for pending candidates
+            # Placeholder: Update the status to 'RETRYING' or implement actual retry logic
+            row["Pull Status"] = "RETRYING"
+            row["Comments"] = "Retrying pending candidate."
+        updated_rows.append(row)
+
+    _write_rows(PULL_TRACK_FILE, PULL_HEADERS, updated_rows)

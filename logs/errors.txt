@@ -1,0 +1,2 @@
+[2026-05-13 06:55:53] ERROR:  CRITICAL SMTP ERROR: 'charmap' codec can't encode character '\u2192' in position 73: character maps to <undefined>
+[2026-05-19 12:31:07] ERROR:  CRITICAL SMTP ERROR: 'charmap' codec can't encode character '\u2192' in position 73: character maps to <undefined>
